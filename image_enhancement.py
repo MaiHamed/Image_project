@@ -36,6 +36,7 @@ def selective_median_filter(img, threshold=50):
 
 def enhance_image(img):
     enhanced = img.copy()
+
     if len(enhanced.shape) == 3:  
         lab = cv2.cvtColor(enhanced, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
@@ -44,13 +45,17 @@ def enhance_image(img):
         lab_eq = cv2.merge((l_eq, a, b))
         enhanced = cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
     else:
-        # Grayscale image
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
         enhanced = clahe.apply(enhanced)
-    blur = cv2.GaussianBlur(enhanced, (5,5), 0)
-    sharpened = cv2.addWeighted(enhanced, 1.5, blur, -0.5, 0)
+
+    lap = cv2.Laplacian(enhanced, cv2.CV_32F)
+    lap -= lap.mean()
+    sharpened = enhanced - 0.2 * lap
+    sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
+
 
     return sharpened
+
 
 
 # -------------------- UPLOAD ZIP --------------------
