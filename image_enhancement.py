@@ -177,8 +177,8 @@ else:
                 cv2.imwrite(output_path, enhanced)
 
                 # Store examples for preview
-                if len(examples) < 3:
-                    examples.append({
+                
+                examples.append({
                         'original': img,
                         'denoised': denoised,
                         'enhanced': enhanced,
@@ -228,13 +228,15 @@ else:
 
     # Ask user how many examples to show
     try:
-        max_examples = min(len(examples), len(image_files))
+        max_examples = len(examples)
         num_examples = int(input(f"\nHow many before/after examples do you want to see? (1-{max_examples}): "))
-        num_examples = max(1, min(num_examples, max_examples))  # Ensure within range
+        num_examples = max(1, min(num_examples, max_examples))
         print(f"✅ Will show {num_examples} examples")
     except ValueError:
-        num_examples = min(3, len(examples))  # Default to 3 if invalid input
-        print(f"⚠️ Invalid input. Showing {num_examples} examples by default")
+        num_examples = min(3, len(examples)) 
+        print(f"⚠️ Invalid input. Showing all {num_examples} examples by default")
+
+
 
     # Show examples
     print(f"\n🖼️ Before/After Examples:")
