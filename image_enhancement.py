@@ -303,3 +303,153 @@ else:
 print("\n" + "=" * 60)
 print("PART 3 COMPLETE - EXAMPLES SHOWN ")
 print("=" * 60)
+
+#Descriptor demo
+#IGNORE
+
+def normalize_descriptor(descriptor, target_length=100):
+    #Normalize descriptor to fixed length and scale
+    #This makes descriptors comparable regardless of original size/point count
+    if len(descriptor) == 0:
+        return np.array([])
+    
+    # Resample to target length using interpolation
+    x_old = np.linspace(0, 1, len(descriptor))
+    x_new = np.linspace(0, 1, target_length)
+    
+    # Linear interpolation to get fixed number of points
+    normalized = np.interp(x_new, x_old, descriptor)
+    
+    # Normalize scale to [-1, 1] range
+    max_abs = np.max(np.abs(normalized))
+    if max_abs > 0:
+        normalized = normalized / max_abs
+    
+    return normalized
+
+def create_test_edges():
+    "Create synthetic edge contours for testing"
+    test_edges = {}
+    
+    # Flat edge (straight line)
+    x = np.linspace(0, 100, 50)
+    y = np.zeros(50)
+    test_edges['flat'] = np.column_stack((x, y))
+    
+    # Tab (outward bulge)
+    x = np.linspace(0, 100, 50)
+    y = 20 * np.sin(np.pi * x / 100)  # Sine wave bulge
+    test_edges['tab'] = np.column_stack((x, y))
+    
+    # Blank (inward curve)
+    x = np.linspace(0, 100, 50)
+    y = -20 * np.sin(np.pi * x / 100)  # Negative sine wave
+    test_edges['blank'] = np.column_stack((x, y))
+    
+    return test_edges
+
+def describe_edge(edge_points):
+    #Describe an edge using distance from centerline
+    #This is exactly what you'll use for real data later!
+
+    # 1. Get endpoints
+    p1 = edge_points[0]
+    p2 = edge_points[-1]
+    
+    # 2. Calculate centerline
+    centerline_vector = p2 - p1
+    centerline_length = np.linalg.norm(centerline_vector)
+    
+    # 3. Calculate distances for each point
+    distances = []
+    for point in edge_points:
+        # Vector from p1 to current point
+        v = point - p1
+        # Projection onto centerline
+        t = np.dot(v, centerline_vector) / (centerline_length ** 2)
+        t = np.clip(t, 0, 1)  # Clamp to segment
+        # Closest point on centerline
+        closest_point = p1 + t * centerline_vector
+        # Signed distance to centerline
+        distance = np.linalg.norm(point - closest_point)
+        # Determine sign (which side of centerline)
+        cross_product = np.cross(centerline_vector, point - p1)
+        if cross_product < 0:
+            distance = -distance
+        distances.append(distance)
+    
+    # 4. Normalize and resample (you'll implement this)
+    normalized_descriptor = normalize_descriptor(distances)
+    return normalized_descriptor
+
+def visualize_edge_description(edge_points, descriptor):
+    #Plot the original edge and its descriptor
+    # This helps you debug and understand what your code is doing
+    import matplotlib.pyplot as plt
+    
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+    
+    # Plot original edge
+    ax1.plot(edge_points[:, 0], edge_points[:, 1], 'b.-')
+    ax1.set_title('Original Edge')
+    ax1.axis('equal')
+    
+    # Plot descriptor
+    ax2.plot(descriptor)
+    ax2.set_title('Shape Descriptor')
+    ax2.set_xlabel('Point index')
+    ax2.set_ylabel('Normalized Distance')
+    
+    plt.show()
+
+def interactive_descriptor_demo():
+    """Let user choose how many descriptor examples to see"""
+    print("\n" + "🧩" * 10 + " INTERACTIVE DESCRIPTOR DEMO " + "🧩" * 10)
+    
+    # Create test edges
+    test_edges = create_test_edges()
+    
+    print(f"📊 Created {len(test_edges)} edge types for demonstration")
+    print("Edge types: FLAT, TAB (bump), BLANK (hole)")
+    
+    # Ask user how many examples to show
+    try:
+        max_possible = len(test_edges)  # This is 3: flat, tab, blank
+        num_to_show = int(input(f"\nHow many edge types do you want to visualize? (1-{max_possible}): "))
+        num_to_show = max(1, min(num_to_show, max_possible))
+        print(f"✅ Will show {num_to_show} edge type examples")
+    except ValueError:
+        num_to_show = min(2, len(test_edges))  # Default to 2 if input invalid
+        print(f"⚠️ Invalid input. Showing {num_to_show} examples by default")
+    
+    # Show selected examples
+    edge_items = list(test_edges.items())
+    
+    for i, (edge_type, edge_points) in enumerate(edge_items[:num_to_show]):
+        print(f"\n📐 Example {i+1}/{num_to_show}: {edge_type.upper()} edge")
+        
+        # Get descriptor
+        descriptor = describe_edge(edge_points)
+        
+        print(f"   Descriptor pattern: [{descriptor.min():.1f} to {descriptor.max():.1f}]")
+        
+        # Simple classification
+        if descriptor.max() > 0.5:
+            classification = "TAB (should fit with a BLANK)"
+        elif descriptor.min() < -0.5:
+            classification = "BLANK (should fit with a TAB)" 
+        else:
+            classification = "FLAT EDGE"
+        
+        print(f"   Classification: {classification}")
+        
+        # Show visualization
+        visualize_edge_description(edge_points, descriptor)
+    
+    # Summary
+    print(f"\n✅ Demonstrated {num_to_show} edge types")
+    print("🎯 Ready to process real puzzle pieces when contours are available!")
+    print(f"💡 For 110 real images, we'll process ALL of them automatically!")
+
+# Actually run the interactive descriptor demo
+interactive_descriptor_demo()
