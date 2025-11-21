@@ -34,11 +34,29 @@ def selective_median_filter(img, threshold=50):
 
     return denoised
 
+def enhance_image(img):
+    enhanced = img.copy()
+    if len(enhanced.shape) == 3:  
+        lab = cv2.cvtColor(enhanced, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        l_eq = clahe.apply(l)
+        lab_eq = cv2.merge((l_eq, a, b))
+        enhanced = cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
+    else:
+        # Grayscale image
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(enhanced)
+    blur = cv2.GaussianBlur(enhanced, (5,5), 0)
+    sharpened = cv2.addWeighted(enhanced, 1.5, blur, -0.5, 0)
+
+    return sharpened
+
+
 # -------------------- UPLOAD ZIP --------------------
 print("\n📦 SELECT PUZZLE ZIP FOLDER")
 
-# Open file dialog
-Tk().withdraw()  # Hide Tkinter main window
+Tk().withdraw() 
 zip_file = askopenfilename(title="Select ZIP file", filetypes=[("ZIP files", "*.zip")])
 
 if not zip_file:
@@ -105,9 +123,9 @@ else:
 print("\n" + "=" * 50)
 print("🎉 Puzzle Image Processing Complete!")
 
-# ============================================================================
-# PART 2: APPLY FILTER TO ALL EXTRACTED IMAGES
-# ============================================================================
+
+
+# PART 2: APPLY FILTERS TO ALL EXTRACTED IMAGES
 print("\n" + "🔧" * 10 + " PART 2: APPLY FILTER TO ALL IMAGES " + "🔧" * 10)
 
 # Create main output directory relative to zip location
@@ -148,18 +166,26 @@ else:
 
             if img is not None:
                 # Apply selective median filter
+                # Apply selective median filter first
                 denoised = selective_median_filter(img, threshold=50)
-                output_path = os.path.join(puzzle_output_dir, f"filtered_{filename}")
-                cv2.imwrite(output_path, denoised)
 
-                # Store for examples (limit to 3 total across all directories)
+                # Apply enhancement (contrast + sharpening)
+                enhanced = enhance_image(denoised)
+
+                # Save the enhanced image
+                output_path = os.path.join(puzzle_output_dir, f"enhanced_{filename}")
+                cv2.imwrite(output_path, enhanced)
+
+                # Store examples for preview
                 if len(examples) < 3:
                     examples.append({
                         'original': img,
                         'denoised': denoised,
+                        'enhanced': enhanced,
                         'filename': filename,
                         'directory': dir_name
                     })
+
 
                 dir_successful += 1
                 total_successful += 1
@@ -186,9 +212,7 @@ print(f"\nCheck the output folder here: {output_dir}")
 print("Folders inside:")
 print(os.listdir(output_dir))
 
-# ============================================================================
 # PART 3: SHOW EXAMPLES
-# ============================================================================
 print("\n" + "🔍" * 10 + " PART 3: SHOW EXAMPLES & METRICS " + "🔍" * 10)
 
 if 'examples' not in locals() or not examples:
@@ -228,17 +252,18 @@ else:
         import matplotlib.pyplot as plt
         plt.figure(figsize=(15, 6))
 
-        plt.subplot(1, 2, 1)
-        plt.imshow(original_rgb)
-        plt.title(f'BEFORE: {example["filename"]}\n({example["directory"]})',
-                  fontsize=12, fontweight='bold')
+        plt.subplot(1,3,1)
+        plt.imshow(cv2.cvtColor(example['original'], cv2.COLOR_BGR2RGB)); plt.title("Original")
         plt.axis('off')
 
-        plt.subplot(1, 2, 2)
-        plt.imshow(denoised_rgb)
-        plt.title(f'AFTER: Selective Median Filter\nNoise Reduced',
-                  fontsize=12, fontweight='bold')
+        plt.subplot(1,3,2)
+        plt.imshow(cv2.cvtColor(example['denoised'], cv2.COLOR_BGR2RGB)); plt.title("Denoised")
         plt.axis('off')
+
+        plt.subplot(1,3,3)
+        plt.imshow(cv2.cvtColor(example['enhanced'], cv2.COLOR_BGR2RGB)); plt.title("Enhanced")
+        plt.axis('off')
+
 
         plt.tight_layout()
         plt.show()
