@@ -304,152 +304,182 @@ print("\n" + "=" * 60)
 print("PART 3 COMPLETE - EXAMPLES SHOWN ")
 print("=" * 60)
 
-#Descriptor demo
+#Descriptor demo - FOR SLIDING TILE PUZZLE
 #IGNORE
 
-def normalize_descriptor(descriptor, target_length=100):
-    #Normalize descriptor to fixed length and scale
-    #This makes descriptors comparable regardless of original size/point count
-    if len(descriptor) == 0:
+def extract_edge_pixels(image, edge_mask):
+    """
+    Extract color/intensity values along a puzzle piece edge
+    For sliding tiles, we match edges based on color patterns, not shapes!
+    """
+    # edge_mask should be a binary mask showing which pixels are on the edge
+    edge_pixels = image[edge_mask > 0]
+    return edge_pixels
+
+def describe_edge_color_pattern(edge_pixels, target_length=100):
+    """
+    Describe an edge using its COLOR/INTENSITY pattern
+    This is what we use for sliding tile puzzles!
+    """
+    if len(edge_pixels) == 0:
         return np.array([])
     
-    # Resample to target length using interpolation
-    x_old = np.linspace(0, 1, len(descriptor))
+    # Convert to grayscale if it's color
+    if len(edge_pixels.shape) > 1 and edge_pixels.shape[1] == 3:
+        # Convert RGB to grayscale
+        intensities = 0.299 * edge_pixels[:, 0] + 0.587 * edge_pixels[:, 1] + 0.114 * edge_pixels[:, 2]
+    else:
+        intensities = edge_pixels
+    
+    # Resample to fixed length
+    x_old = np.linspace(0, 1, len(intensities))
     x_new = np.linspace(0, 1, target_length)
     
-    # Linear interpolation to get fixed number of points
-    normalized = np.interp(x_new, x_old, descriptor)
+    # Interpolate to get consistent descriptor length
+    descriptor = np.interp(x_new, x_old, intensities)
     
-    # Normalize scale to [-1, 1] range
-    max_abs = np.max(np.abs(normalized))
-    if max_abs > 0:
-        normalized = normalized / max_abs
+    # Normalize to [0, 1] range
+    if descriptor.max() > descriptor.min():
+        descriptor = (descriptor - descriptor.min()) / (descriptor.max() - descriptor.min())
     
-    return normalized
+    return descriptor
 
-def create_test_edges():
-    "Create synthetic edge contours for testing"
+def create_test_sliding_tile_edges():
+    """
+    Create synthetic edge INTENSITY patterns for testing
+    Simulates different color patterns along straight edges
+    """
     test_edges = {}
     
-    # Flat edge (straight line)
-    x = np.linspace(0, 100, 50)
-    y = np.zeros(50)
-    test_edges['flat'] = np.column_stack((x, y))
+    # Edge 1: Smooth gradient (light to dark)
+    x = np.linspace(0, 100, 100)
+    intensity = np.linspace(1.0, 0.2, 100)  # Smooth gradient
+    test_edges['gradient'] = intensity
     
-    # Tab (outward bulge)
-    x = np.linspace(0, 100, 50)
-    y = 20 * np.sin(np.pi * x / 100)  # Sine wave bulge
-    test_edges['tab'] = np.column_stack((x, y))
+    # Edge 2: High contrast pattern (like an object boundary)
+    intensity = 0.3 + 0.7 * (np.sin(8 * np.pi * x / 100) > 0)  # Striped pattern
+    test_edges['high_contrast'] = intensity
     
-    # Blank (inward curve)
-    x = np.linspace(0, 100, 50)
-    y = -20 * np.sin(np.pi * x / 100)  # Negative sine wave
-    test_edges['blank'] = np.column_stack((x, y))
+    # Edge 3: Medium pattern (texture)
+    intensity = 0.5 + 0.3 * np.sin(4 * np.pi * x / 100)  # Wavy pattern
+    test_edges['medium_pattern'] = intensity
+    
+    # Edge 4: Uniform color (flat area)
+    intensity = np.full(100, 0.7)  # Constant color
+    test_edges['uniform'] = intensity
     
     return test_edges
 
-def describe_edge(edge_points):
-    #Describe an edge using distance from centerline
-    #This is exactly what you'll use for real data later!
-
-    # 1. Get endpoints
-    p1 = edge_points[0]
-    p2 = edge_points[-1]
-    
-    # 2. Calculate centerline
-    centerline_vector = p2 - p1
-    centerline_length = np.linalg.norm(centerline_vector)
-    
-    # 3. Calculate distances for each point
-    distances = []
-    for point in edge_points:
-        # Vector from p1 to current point
-        v = point - p1
-        # Projection onto centerline
-        t = np.dot(v, centerline_vector) / (centerline_length ** 2)
-        t = np.clip(t, 0, 1)  # Clamp to segment
-        # Closest point on centerline
-        closest_point = p1 + t * centerline_vector
-        # Signed distance to centerline
-        distance = np.linalg.norm(point - closest_point)
-        # Determine sign (which side of centerline)
-        cross_product = np.cross(centerline_vector, point - p1)
-        if cross_product < 0:
-            distance = -distance
-        distances.append(distance)
-    
-    # 4. Normalize and resample (you'll implement this)
-    normalized_descriptor = normalize_descriptor(distances)
-    return normalized_descriptor
-
-def visualize_edge_description(edge_points, descriptor):
-    #Plot the original edge and its descriptor
-    # This helps you debug and understand what your code is doing
+def visualize_sliding_tile_edge(pattern, descriptor, edge_name):
+    """
+    Plot the intensity pattern and its descriptor
+    """
     import matplotlib.pyplot as plt
     
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
     
-    # Plot original edge
-    ax1.plot(edge_points[:, 0], edge_points[:, 1], 'b.-')
-    ax1.set_title('Original Edge')
-    ax1.axis('equal')
+    # Plot original intensity pattern along the edge
+    ax1.plot(pattern, 'b-', linewidth=2)
+    ax1.set_title(f'Original Intensity Pattern\n({edge_name} Edge)')
+    ax1.set_xlabel('Position along edge')
+    ax1.set_ylabel('Intensity (0-1)')
+    ax1.grid(True, alpha=0.3)
+    ax1.set_ylim(0, 1)
     
-    # Plot descriptor
-    ax2.plot(descriptor)
-    ax2.set_title('Shape Descriptor')
-    ax2.set_xlabel('Point index')
-    ax2.set_ylabel('Normalized Distance')
+    # Plot the normalized descriptor
+    ax2.plot(descriptor, 'r-', linewidth=2)
+    ax2.set_title('Color Pattern Descriptor')
+    ax2.set_xlabel('Position along edge (normalized)')
+    ax2.set_ylabel('Normalized Intensity')
+    ax2.grid(True, alpha=0.3)
+    ax2.set_ylim(0, 1)
     
+    plt.tight_layout()
     plt.show()
 
-def interactive_descriptor_demo():
-    """Let user choose how many descriptor examples to see"""
-    print("\n" + "🧩" * 10 + " INTERACTIVE DESCRIPTOR DEMO " + "🧩" * 10)
+def compare_sliding_tile_edges(desc1, desc2):
+    """
+    Compare two edge descriptors for sliding tiles
+    Low score = good color match
+    """
+    if len(desc1) == 0 or len(desc2) == 0:
+        return float('inf')
     
-    # Create test edges
-    test_edges = create_test_edges()
+    # Simple Mean Squared Error
+    score = np.mean((desc1 - desc2) ** 2)
     
-    print(f"📊 Created {len(test_edges)} edge types for demonstration")
-    print("Edge types: FLAT, TAB (bump), BLANK (hole)")
+    # Also try reversed (for opposite edges)
+    reversed_score = np.mean((desc1 - desc2[::-1]) ** 2)
+    
+    return min(score, reversed_score)
+
+def interactive_sliding_tile_demo():
+    """
+    Demo for SLIDING TILE puzzle edges - based on COLOR PATTERNS
+    """
+    print("\n" + "🧩" * 10 + " SLIDING TILE DESCRIPTOR DEMO " + "🧩" * 10)
+    print("🔍 For SLIDING TILES - we match edges based on COLOR PATTERNS!")
+    print("   (Not shapes like jigsaw puzzles)")
+    
+    # Create test intensity patterns
+    test_edges = create_test_sliding_tile_edges()
+    
+    print(f"\n📊 Created {len(test_edges)} edge INTENSITY patterns:")
+    for edge_type in test_edges.keys():
+        print(f"   - {edge_type}")
     
     # Ask user how many examples to show
     try:
-        max_possible = len(test_edges)  # This is 3: flat, tab, blank
-        num_to_show = int(input(f"\nHow many edge types do you want to visualize? (1-{max_possible}): "))
+        max_possible = len(test_edges)
+        num_to_show = int(input(f"\nHow many pattern types do you want to see? (1-{max_possible}): "))
         num_to_show = max(1, min(num_to_show, max_possible))
-        print(f"✅ Will show {num_to_show} edge type examples")
+        print(f"✅ Will show {num_to_show} intensity pattern examples")
     except ValueError:
-        num_to_show = min(2, len(test_edges))  # Default to 2 if input invalid
+        num_to_show = min(3, len(test_edges))
         print(f"⚠️ Invalid input. Showing {num_to_show} examples by default")
     
     # Show selected examples
     edge_items = list(test_edges.items())
     
-    for i, (edge_type, edge_points) in enumerate(edge_items[:num_to_show]):
-        print(f"\n📐 Example {i+1}/{num_to_show}: {edge_type.upper()} edge")
+    print(f"\n🎨 Intensity Pattern Analysis:")
+    print("   Left graph: Original color pattern along edge")
+    print("   Right graph: Normalized descriptor for matching")
+    
+    for i, (edge_type, intensity_pattern) in enumerate(edge_items[:num_to_show]):
+        print(f"\n📐 Example {i+1}/{num_to_show}: {edge_type.upper()} pattern")
         
-        # Get descriptor
-        descriptor = describe_edge(edge_points)
+        # The intensity pattern IS our "raw data" - just normalize it
+        descriptor = describe_edge_color_pattern(intensity_pattern)
         
-        print(f"   Descriptor pattern: [{descriptor.min():.1f} to {descriptor.max():.1f}]")
-        
-        # Simple classification
-        if descriptor.max() > 0.5:
-            classification = "TAB (should fit with a BLANK)"
-        elif descriptor.min() < -0.5:
-            classification = "BLANK (should fit with a TAB)" 
-        else:
-            classification = "FLAT EDGE"
-        
-        print(f"   Classification: {classification}")
+        print(f"   Pattern range: [{intensity_pattern.min():.2f} to {intensity_pattern.max():.2f}]")
+        print(f"   Descriptor length: {len(descriptor)} points")
         
         # Show visualization
-        visualize_edge_description(edge_points, descriptor)
+        visualize_sliding_tile_edge(intensity_pattern, descriptor, edge_type)
     
-    # Summary
-    print(f"\n✅ Demonstrated {num_to_show} edge types")
-    print("🎯 Ready to process real puzzle pieces when contours are available!")
-    print(f"💡 For 110 real images, we'll process ALL of them automatically!")
+    # Demonstrate matching
+    print(f"\n🔗 Pattern Matching Demo:")
+    patterns_list = list(test_edges.items())
+    
+    # Compare a few patterns
+    comparisons = [
+        (0, 1, "gradient vs high-contrast"),
+        (0, 0, "gradient vs itself (should match perfectly)"),
+        (2, 3, "medium pattern vs uniform")
+    ]
+    
+    for idx1, idx2, description in comparisons:
+        if idx1 < len(patterns_list) and idx2 < len(patterns_list):
+            desc1 = describe_edge_color_pattern(patterns_list[idx1][1])
+            desc2 = describe_edge_color_pattern(patterns_list[idx2][1])
+            score = compare_sliding_tile_edges(desc1, desc2)
+            
+            match_quality = "PERFECT" if score < 0.01 else "GOOD" if score < 0.1 else "POOR"
+            print(f"   {description}: score = {score:.4f} ({match_quality} match)")
+    
+    print(f"\n✅ Sliding tile descriptor system ready!")
+    print("🎯 For real images, we'll extract color patterns from piece edges!")
+    print("💡 Matching principle: Similar color patterns = likely neighbors!")
 
-# Actually run the interactive descriptor demo
-interactive_descriptor_demo()
+# Actually run the SLIDING TILE descriptor demo
+interactive_sliding_tile_demo()
