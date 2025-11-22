@@ -34,21 +34,18 @@ def selective_median_filter(img, threshold=50):
 
     return denoised
 
-def laplacian_edges(img, lap_thresh=25):
+def canny_edges(img, low_threshold=50, high_threshold=150):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray_blur = cv2.GaussianBlur(gray, (3,3), 0) 
-    # Laplacian
-    lap = cv2.Laplacian(gray_blur, cv2.CV_16S, ksize=3)
-    lap_abs = cv2.convertScaleAbs(lap)
-    _, edge_mask = cv2.threshold(lap_abs, lap_thresh, 255, cv2.THRESH_BINARY)
     
-    #morphological operations
-    kernel = np.ones((2,2), np.uint8)
-    edge_mask = cv2.morphologyEx(edge_mask, cv2.MORPH_OPEN, kernel)
+    gray_blur = cv2.bilateralFilter(gray, 9, 75, 75)
+    edges = cv2.Canny(gray_blur, low_threshold, high_threshold)
     
-    return edge_mask
+    kernel = np.ones((1,1), np.uint8) 
+    edges = cv2.morphologyEx(edges, cv2.MORPH_OPEN, kernel)
+    
+    return edges
 
-def enhance_image(img, lap_thresh=25):
+def enhance_image(img, low_threshold=50, high_threshold=150):
     enhanced = img.copy()
 
     # CLAHE
@@ -59,18 +56,16 @@ def enhance_image(img, lap_thresh=25):
     lab_eq = cv2.merge((l_eq, a, b))
     enhanced = cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
 
-    # Laplacian Sharpening - reduced strength for finer edges
+    #sharpening
     lap = cv2.Laplacian(enhanced, cv2.CV_32F)
     lap -= lap.mean()
-    sharpened = enhanced - 0.08 * lap  # Reduced from 0.15
+    sharpened = enhanced - 0.1 * lap
     sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
 
-    # Get CLEAN edges
-    edges_bw = laplacian_edges(sharpened, lap_thresh)
+    # clean edges using Canny
+    edges_bw = canny_edges(sharpened, low_threshold, high_threshold)
 
     return sharpened, edges_bw
-
-
 
 # -------------------- UPLOAD ZIP --------------------
 print("\n📦 SELECT PUZZLE ZIP FOLDER")
@@ -185,11 +180,10 @@ else:
 
             if img is not None:
                 # Apply selective median filter
-                # Apply selective median filter first
                 denoised = selective_median_filter(img, threshold=50)
 
-                # Apply enhancement (contrast + sharpening)
-                enhanced, edges_bw = enhance_image(denoised, lap_thresh=25)
+                # Apply enhancement
+                enhanced, edges_bw = enhance_image(denoised, low_threshold=50, high_threshold=150)
 
                 # Save the enhanced image
                 output_path = os.path.join(puzzle_output_dir, f"enhanced_{filename}")
