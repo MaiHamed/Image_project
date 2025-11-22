@@ -18,7 +18,7 @@ def selective_median_filter(img, threshold=50):
 
     denoised = img.copy()
 
-    # Process each pixel (skip borders)
+    # Process each pixel
     for i in range(1, img.shape[0]-1):
         for j in range(1, img.shape[1]-1):
             neighborhood = gray[i-1:i+2, j-1:j+2]
@@ -34,27 +34,41 @@ def selective_median_filter(img, threshold=50):
 
     return denoised
 
-def enhance_image(img):
+def laplacian_edges(img, lap_thresh=25):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    gray_blur = cv2.GaussianBlur(gray, (3,3), 0) 
+    # Laplacian
+    lap = cv2.Laplacian(gray_blur, cv2.CV_16S, ksize=3)
+    lap_abs = cv2.convertScaleAbs(lap)
+    _, edge_mask = cv2.threshold(lap_abs, lap_thresh, 255, cv2.THRESH_BINARY)
+    
+    #morphological operations
+    kernel = np.ones((2,2), np.uint8)
+    edge_mask = cv2.morphologyEx(edge_mask, cv2.MORPH_OPEN, kernel)
+    
+    return edge_mask
+
+def enhance_image(img, lap_thresh=25):
     enhanced = img.copy()
 
-    if len(enhanced.shape) == 3:  
-        lab = cv2.cvtColor(enhanced, cv2.COLOR_BGR2LAB)
-        l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        l_eq = clahe.apply(l)
-        lab_eq = cv2.merge((l_eq, a, b))
-        enhanced = cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
-    else:
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
-        enhanced = clahe.apply(enhanced)
+    # CLAHE
+    lab = cv2.cvtColor(enhanced, cv2.COLOR_BGR2LAB)
+    l, a, b = cv2.split(lab)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+    l_eq = clahe.apply(l)
+    lab_eq = cv2.merge((l_eq, a, b))
+    enhanced = cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
 
+    # Laplacian Sharpening - reduced strength for finer edges
     lap = cv2.Laplacian(enhanced, cv2.CV_32F)
     lap -= lap.mean()
-    sharpened = enhanced - 0.2 * lap
+    sharpened = enhanced - 0.08 * lap  # Reduced from 0.15
     sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
 
+    # Get CLEAN edges
+    edges_bw = laplacian_edges(sharpened, lap_thresh)
 
-    return sharpened
+    return sharpened, edges_bw
 
 
 
@@ -175,7 +189,7 @@ else:
                 denoised = selective_median_filter(img, threshold=50)
 
                 # Apply enhancement (contrast + sharpening)
-                enhanced = enhance_image(denoised)
+                enhanced, edges_bw = enhance_image(denoised, lap_thresh=25)
 
                 # Save the enhanced image
                 output_path = os.path.join(puzzle_output_dir, f"enhanced_{filename}")
@@ -184,12 +198,13 @@ else:
                 # Store examples for preview
                 
                 examples.append({
-                        'original': img,
-                        'denoised': denoised,
-                        'enhanced': enhanced,
-                        'filename': filename,
-                        'directory': dir_name
-                    })
+                    'original': img,
+                    'denoised': denoised,
+                    'enhanced': enhanced,
+                    'edges_bw': edges_bw,
+                    'filename': filename,
+                    'directory': dir_name
+                })
 
 
                 dir_successful += 1
@@ -257,20 +272,27 @@ else:
 
         # Display side by side
         import matplotlib.pyplot as plt
-        plt.figure(figsize=(15, 6))
+        plt.figure(figsize=(18, 6))
 
-        plt.subplot(1,3,1)
-        plt.imshow(cv2.cvtColor(example['original'], cv2.COLOR_BGR2RGB)); plt.title("Original")
+        plt.subplot(1,4,1)
+        plt.imshow(cv2.cvtColor(example['original'], cv2.COLOR_BGR2RGB))
+        plt.title("Original")
         plt.axis('off')
 
-        plt.subplot(1,3,2)
-        plt.imshow(cv2.cvtColor(example['denoised'], cv2.COLOR_BGR2RGB)); plt.title("Denoised")
+        plt.subplot(1,4,2)
+        plt.imshow(cv2.cvtColor(example['denoised'], cv2.COLOR_BGR2RGB))
+        plt.title("Denoised")
         plt.axis('off')
 
-        plt.subplot(1,3,3)
-        plt.imshow(cv2.cvtColor(example['enhanced'], cv2.COLOR_BGR2RGB)); plt.title("Enhanced")
+        plt.subplot(1,4,3)
+        plt.imshow(cv2.cvtColor(example['enhanced'], cv2.COLOR_BGR2RGB))
+        plt.title("Enhanced")
         plt.axis('off')
 
+        plt.subplot(1,4,4)
+        plt.imshow(example['edges_bw'], cmap='gray')
+        plt.title("Edges (BW)")
+        plt.axis('off')
 
         plt.tight_layout()
         plt.show()
