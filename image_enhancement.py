@@ -2,6 +2,7 @@ import cv2
 import os
 import zipfile
 import numpy as np
+import matplotlib.pyplot as plt
 import shutil
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
@@ -67,6 +68,7 @@ def enhance_image(img, low_threshold=50, high_threshold=150):
 
     return sharpened, edges_bw
 
+
 # -------------------- UPLOAD ZIP --------------------
 print("\n📦 SELECT PUZZLE ZIP FOLDER")
 
@@ -95,7 +97,7 @@ with zipfile.ZipFile(zip_file, 'r') as zip_ref:
 print("✅ Extraction complete!")
 
 # -------------------- FIND IMAGES --------------------
-print("\n🔍 Finding all images (skipping Mac system files)...")
+print("\n🔍 Finding all images...")
 image_files = []
 
 for root, dirs, files in os.walk(extract_dir):
@@ -170,6 +172,16 @@ else:
         puzzle_output_dir = os.path.join(output_dir, dir_name if dir_name != 'root' else 'main_images')
         os.makedirs(puzzle_output_dir, exist_ok=True)
 
+        orig_dir = os.path.join(puzzle_output_dir, "original")
+        denoise_dir = os.path.join(puzzle_output_dir, "denoised")
+        enhance_dir = os.path.join(puzzle_output_dir, "enhanced")
+        edges_dir = os.path.join(puzzle_output_dir, "edges")
+
+        os.makedirs(orig_dir, exist_ok=True)
+        os.makedirs(denoise_dir, exist_ok=True)
+        os.makedirs(enhance_dir, exist_ok=True)
+        os.makedirs(edges_dir, exist_ok=True)
+
         dir_successful = 0
 
         for i, img_info in enumerate(dir_images, 1):
@@ -185,9 +197,12 @@ else:
                 # Apply enhancement
                 enhanced, edges_bw = enhance_image(denoised, low_threshold=50, high_threshold=150)
 
-                # Save the enhanced image
-                output_path = os.path.join(puzzle_output_dir, f"enhanced_{filename}")
-                cv2.imwrite(output_path, enhanced)
+
+                cv2.imwrite(os.path.join(orig_dir, filename), img)
+                cv2.imwrite(os.path.join(denoise_dir, filename), denoised)
+                cv2.imwrite(os.path.join(enhance_dir, filename), enhanced)
+                cv2.imwrite(os.path.join(edges_dir, f"edges_{filename}"), edges_bw)
+
 
                 # Store examples for preview
                 
@@ -265,7 +280,6 @@ else:
         denoised_rgb = cv2.cvtColor(example['denoised'], cv2.COLOR_BGR2RGB)
 
         # Display side by side
-        import matplotlib.pyplot as plt
         plt.figure(figsize=(18, 6))
 
         plt.subplot(1,4,1)
@@ -285,7 +299,7 @@ else:
 
         plt.subplot(1,4,4)
         plt.imshow(example['edges_bw'], cmap='gray')
-        plt.title("Edges (BW)")
+        plt.title("Edges")
         plt.axis('off')
 
         plt.tight_layout()
