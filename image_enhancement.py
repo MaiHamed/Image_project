@@ -719,180 +719,213 @@ else:
     print("❌ No images found.")
 
 # ==============================================================
-# PART 6: EDGE DESCRIPTOR EXTRACTION & ANALYSIS
+# PART 6: EDGE DESCRIPTOR ANALYSIS & COMPARISON
 # ==============================================================
-print("\n" + "🧬" * 10 + " PART 6: EDGE DESCRIPTOR EXTRACTION " + "🧬" * 10)
+print("\n" + "🧬" * 10 + " PART 6: EDGE DESCRIPTOR ANALYSIS " + "🧬" * 10)
 
 def extract_rectangular_edges(piece_img):
-    """
-    Extracts pixel values from the 4 borders of a rectangular piece.
-    Returns a dictionary of arrays.
-    """
-    if piece_img is None: return {}
-    
-    h, w = piece_img.shape[:2]
-    
-    # Extract raw pixel strips
-    edges = {
-        'top': piece_img[0, :],           # Top row
-        'bottom': piece_img[h-1, :],      # Bottom row
-        'left': piece_img[:, 0],          # Left column
-        'right': piece_img[:, w-1]        # Right column
+    #Extract all 4 edges from a rectangular puzzle piece
+    if piece_img is None:
+        return {}
+    height, width = piece_img.shape[:2]
+    return {
+        'top': piece_img[0, :, :],
+        'bottom': piece_img[-1, :, :],  
+        'left': piece_img[:, 0, :],
+        'right': piece_img[:, -1, :]
     }
-    return edges
 
 def describe_edge_color_pattern(edge_pixels, target_length=100):
-    """
-    Converts a strip of colored pixels into a normalized 1D intensity descriptor.
-    (Adapted from your code)
-    """
-    if len(edge_pixels) == 0: return np.array([])
+    #Convert edge pixels to normalized intensity pattern
+    if len(edge_pixels) == 0:
+        return np.array([])
     
-    # Convert BGR to Grayscale Intensity if needed
     if len(edge_pixels.shape) > 1 and edge_pixels.shape[1] == 3:
-        # Standard luminance formula: 0.299R + 0.587G + 0.114B
-        # Note: OpenCV is BGR, so: 0.114*B + 0.587*G + 0.299*R
-        intensities = 0.114 * edge_pixels[:, 0] + 0.587 * edge_pixels[:, 1] + 0.299 * edge_pixels[:, 2]
+        intensities = 0.299 * edge_pixels[:, 0] + 0.587 * edge_pixels[:, 1] + 0.114 * edge_pixels[:, 2]
     else:
         intensities = edge_pixels.flatten()
+    
+    if len(intensities) < 2:
+        return np.array([])
         
-    # Interpolate to fixed length (invariant to piece size)
     x_old = np.linspace(0, 1, len(intensities))
     x_new = np.linspace(0, 1, target_length)
-    descriptor = np.interp(x_new, x_old, intensities)
+    normalized = np.interp(x_new, x_old, intensities)
     
-    # Normalize values to 0-1 range
-    if descriptor.max() > descriptor.min():
-        descriptor = (descriptor - descriptor.min()) / (descriptor.max() - descriptor.min())
+    if normalized.max() > normalized.min():
+        normalized = (normalized - normalized.min()) / (normalized.max() - normalized.min())
     else:
-        descriptor = np.zeros_like(descriptor) # Handle flat color edges
-        
-    return descriptor
+        normalized = np.zeros(target_length)
+    
+    return normalized
 
 def compare_edges(desc1, desc2):
-    """Calculates difference score (Lower is better match)"""
-    if len(desc1) == 0 or len(desc2) == 0: return float('inf')
-    
-    # Mean Squared Error
-    score = np.mean((desc1 - desc2) ** 2)
-    return score
+    #Compare two edge descriptors (lower = better match)
+    if len(desc1) == 0 or len(desc2) == 0:
+        return float('inf')
+    return np.mean((desc1 - desc2) ** 2)
 
-# ==============================================================
-# PART 6: EDGE DESCRIPTOR EXTRACTION & ANALYSIS (CORRECTED MATCH VISUALIZATION)
-# ==============================================================
-print("\n" + "🧬" * 10 + " PART 6: EDGE DESCRIPTOR EXTRACTION & ANALYSIS " + "🧬" * 10)
+def analyze_all_possible_matches(all_pieces_data, piece_files, N):
+    #compare all pieces against all other pieces
+    print(f"   🔍 COMPARISON ANALYSIS for {N}x{N} puzzle:")
+    print(f"   Testing {len(all_pieces_data)} pieces against each other...")
+    
+    all_comparisons = []
+    
+    # Compare every piece with every other piece
+    for i in range(len(all_pieces_data)):
+        for j in range(len(all_pieces_data)):
+            if i == j:  # Skip comparing piece with itself
+                continue
+                
+            piece1_data = all_pieces_data[i]
+            piece2_data = all_pieces_data[j]
+            
+            # Compare all edge combinations
+            edge_pairs = [
+                ('right', 'left', 'P{i}→P{j}'),    # Horizontal neighbors
+                ('bottom', 'top', 'P{i}↓P{j}'),    # Vertical neighbors
+                ('left', 'right', 'P{i}←P{j}'),    # Reverse horizontal
+                ('top', 'bottom', 'P{i}↑P{j}')     # Reverse vertical
+            ]
+            
+            for edge1, edge2, label in edge_pairs:
+                if edge1 in piece1_data and edge2 in piece2_data:
+                    desc1 = piece1_data[edge1]
+                    desc2 = piece2_data[edge2]
+                    
+                    score = compare_edges(desc1, desc2)
+                    
+                    all_comparisons.append({
+                        'piece1': i, 'piece2': j,
+                        'edge1': edge1, 'edge2': edge2, 
+                        'score': score,
+                        'label': f"P{i+1} {edge1} ↔ P{j+1} {edge2}"
+                    })
+    
+    # Sort by best matches
+    all_comparisons.sort(key=lambda x: x['score'])
+    
+    # Show analysis results
+    print(f"\n   📊 MATCH ANALYSIS RESULTS:")
+    print(f"   Found {len(all_comparisons)} possible edge matches")
+    
+    # Show best matches
+    print(f"\n   🏆 TOP 15 BEST MATCHES:")
+    for idx, match in enumerate(all_comparisons[:15]):
+        quality = "🌟" if match['score'] < 0.01 else "✅" if match['score'] < 0.05 else "⚠️"
+        print(f"      {idx+1:2d}. {quality} {match['label']}: {match['score']:.4f}")
+    
+    # Show worst matches
+    print(f"\n   🔻 TOP 15 WORST MATCHES:")
+    for idx, match in enumerate(all_comparisons[-15:]):
+        print(f"      {idx+1:2d}. ❌ {match['label']}: {match['score']:.4f}")
+    
+    return all_comparisons
 
-# Re-using previously defined functions:
-# extract_rectangular_edges, describe_edge_color_pattern, compare_edges
-
-def visualize_piece_descriptors(piece_img, descriptors, filename):
-    """
-    Visualizes the piece and the descriptors for its 4 sides
-    """
-    plt.figure(figsize=(14, 8))
+def visualize_comparison_heatmap(all_comparisons, piece_files, N, puzzle_name):
+    #Create a heatmap showing how well pieces match each other
+    num_pieces = len(piece_files)
     
-    # Center: The Piece Image
-    ax_main = plt.subplot2grid((3, 3), (1, 1))
-    ax_main.imshow(cv2.cvtColor(piece_img, cv2.COLOR_BGR2RGB))
-    ax_main.set_title(f"Piece: {filename}", fontweight='bold')
-    ax_main.axis('off')
+    # Create score matrices for different edge types
+    horizontal_scores = np.full((num_pieces, num_pieces), np.nan)
+    vertical_scores = np.full((num_pieces, num_pieces), np.nan)
     
-    # Top Descriptor
-    ax_top = plt.subplot2grid((3, 3), (0, 1))
-    ax_top.plot(descriptors['top'], 'r-')
-    ax_top.set_title("Top Edge Signal")
-    ax_top.set_ylim(0, 1)
-    ax_top.axis('off')
+    for match in all_comparisons:
+        i, j = match['piece1'], match['piece2']
+        
+        if match['edge1'] == 'right' and match['edge2'] == 'left':
+            horizontal_scores[i, j] = match['score']
+        elif match['edge1'] == 'bottom' and match['edge2'] == 'top':
+            vertical_scores[i, j] = match['score']
     
-    # Bottom Descriptor
-    ax_bottom = plt.subplot2grid((3, 3), (2, 1))
-    ax_bottom.plot(descriptors['bottom'], 'r-')
-    ax_bottom.set_title("Bottom Edge Signal")
-    ax_bottom.set_ylim(0, 1)
-    ax_bottom.invert_yaxis() 
-    ax_bottom.axis('off')
+    # Create the visualization
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
     
-    # Left Descriptor
-    ax_left = plt.subplot2grid((3, 3), (1, 0))
-    ax_left.plot(descriptors['left'], 'b-')
-    ax_left.set_title("Left Edge")
-    ax_left.set_ylim(0, 1)
-    ax_left.axis('off')
-
-    # Right Descriptor
-    ax_right = plt.subplot2grid((3, 3), (1, 2))
-    ax_right.plot(descriptors['right'], 'b-')
-    ax_right.set_title("Right Edge")
-    ax_right.set_ylim(0, 1)
-    ax_right.axis('off')
+    # Horizontal matches heatmap
+    im1 = ax1.imshow(horizontal_scores, cmap='RdYlGn_r', aspect='auto')
+    ax1.set_title(f'Horizontal Match Scores\n(Piece Right ↔ Other Piece Left)', fontweight='bold')
+    ax1.set_xlabel('Other Piece Number')
+    ax1.set_ylabel('Piece Number')
+    ax1.set_xticks(range(num_pieces))
+    ax1.set_yticks(range(num_pieces))
+    ax1.set_xticklabels([f'P{i+1}' for i in range(num_pieces)])
+    ax1.set_yticklabels([f'P{i+1}' for i in range(num_pieces)])
+    plt.colorbar(im1, ax=ax1, label='Match Score (lower = better)')
     
+    # Add score values to heatmap
+    for i in range(num_pieces):
+        for j in range(num_pieces):
+            if not np.isnan(horizontal_scores[i, j]):
+                ax1.text(j, i, f'{horizontal_scores[i, j]:.2f}', 
+                        ha='center', va='center', fontsize=8, 
+                        color='white' if horizontal_scores[i, j] > 0.5 else 'black')
+    
+    # Vertical matches heatmap
+    im2 = ax2.imshow(vertical_scores, cmap='RdYlGn_r', aspect='auto')
+    ax2.set_title(f'Vertical Match Scores\n(Piece Bottom ↔ Other Piece Top)', fontweight='bold')
+    ax2.set_xlabel('Other Piece Number')
+    ax2.set_ylabel('Piece Number')
+    ax2.set_xticks(range(num_pieces))
+    ax2.set_yticks(range(num_pieces))
+    ax2.set_xticklabels([f'P{i+1}' for i in range(num_pieces)])
+    ax2.set_yticklabels([f'P{i+1}' for i in range(num_pieces)])
+    plt.colorbar(im2, ax=ax2, label='Match Score (lower = better)')
+    
+    # Add score values to heatmap
+    for i in range(num_pieces):
+        for j in range(num_pieces):
+            if not np.isnan(vertical_scores[i, j]):
+                ax2.text(j, i, f'{vertical_scores[i, j]:.2f}', 
+                        ha='center', va='center', fontsize=8,
+                        color='white' if vertical_scores[i, j] > 0.5 else 'black')
+    
+    plt.suptitle(f'Puzzle Match Analysis: {puzzle_name} ({N}x{N})', fontsize=16, fontweight='bold')
     plt.tight_layout()
     plt.show()
+    
+    return horizontal_scores, vertical_scores
 
-def visualize_correct_match(piece1_img, piece2_img, desc1, desc2, score, match_type):
-    """
-    Plots two adjacent pieces and their corresponding matching edges and descriptors.
-    """
+def visualize_best_match_pair(piece1_img, piece2_img, desc1, desc2, score, match_info):
+    #Visualize one good match pair
+    piece1_num = match_info['piece1'] + 1
+    piece2_num = match_info['piece2'] + 1
     
-    if match_type == 'Horizontal':
-        edge1_name = "Right Edge (P1)"
-        edge2_name = "Left Edge (P2)"
-        title_tag = "Horizontal Match (P1 vs P2)"
-    else: # Vertical
-        edge1_name = "Bottom Edge (P1)"
-        edge2_name = "Top Edge (P2)"
-        title_tag = "Vertical Match (P1 vs P(1+N))"
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 4))
     
-    
-    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5), gridspec_kw={'width_ratios': [1, 2, 1]})
-
-    # 1. Piece 1 and Piece 2 Visualization
-    combined_img = np.hstack((piece1_img, piece2_img))
-    ax1.imshow(cv2.cvtColor(combined_img, cv2.COLOR_BGR2RGB))
-    ax1.set_title(f"{match_type} Check (Score: {score:.4f})", fontweight='bold')
+    # Show pieces separately
+    ax1.imshow(cv2.cvtColor(piece1_img, cv2.COLOR_BGR2RGB))
+    ax1.set_title(f'Piece {piece1_num}\n{match_info["edge1"]} edge', fontweight='bold')
     ax1.axis('off')
-
-    # 2. Descriptor Comparison Plot
-    ax2.plot(desc1, 'b-', label=edge1_name, linewidth=2)
     
-    # If Horizontal, reverse the second descriptor so the signals overlap correctly.
-    if match_type == 'Horizontal':
-        desc2_rev = desc2[::-1] # Reverse the signal for Left Edge
-        ax2.plot(desc2_rev, 'r--', label=f'{edge2_name} (Reversed)', linewidth=2, alpha=0.7)
-    else: # Vertical (Bottom-to-Top)
-        ax2.plot(desc2, 'r--', label=edge2_name, linewidth=2, alpha=0.7)
-        
-    ax2.set_title(f"Descriptor Overlap: {title_tag}")
-    ax2.set_xlabel("Normalized Position along Edge")
-    ax2.set_ylabel("Normalized Intensity (0-1)")
-    ax2.set_ylim(0, 1)
-    ax2.legend()
-    ax2.grid(True, alpha=0.3)
+    ax2.imshow(cv2.cvtColor(piece2_img, cv2.COLOR_BGR2RGB))
+    ax2.set_title(f'Piece {piece2_num}\n{match_info["edge2"]} edge', fontweight='bold')
+    ax2.axis('off')
     
-    # 3. Simple Error/Difference Plot (Optional but helpful)
-    if match_type == 'Horizontal':
-        diff = np.abs(desc1 - desc2_rev)
+    # Show descriptor comparison
+    if match_info['edge1'] == 'right' and match_info['edge2'] == 'left':
+        # For horizontal match, reverse the second descriptor
+        desc2_plot = desc2[::-1]
+        match_type = "Horizontal"
     else:
-        diff = np.abs(desc1 - desc2)
-        
-    ax3.plot(diff, 'g-', linewidth=1)
-    ax3.fill_between(range(len(diff)), diff, color='g', alpha=0.1)
-    ax3.set_title(f"Absolute Difference (Mean Error: {score:.4f})")
-    ax3.set_xlabel("Position")
-    ax3.set_ylim(0, 0.5)
+        desc2_plot = desc2
+        match_type = "Vertical"
+    
+    ax3.plot(desc1, 'b-', label=f'P{piece1_num} {match_info["edge1"]}', linewidth=2)
+    ax3.plot(desc2_plot, 'r--', label=f'P{piece2_num} {match_info["edge2"]}', linewidth=2, alpha=0.7)
+    ax3.set_title(f'Descriptor Comparison\n{match_type} Match\nScore: {score:.4f}')
+    ax3.set_xlabel('Position along edge')
+    ax3.set_ylabel('Normalized Intensity')
+    ax3.legend()
     ax3.grid(True, alpha=0.3)
-
+    ax3.set_ylim(0, 1)
+    
     plt.tight_layout()
     plt.show()
 
-# Run Part 6
+# Run the comparison analysis
 if 'images_by_dir' in locals():
-    print("🔍 Extracting descriptors from processed pieces...")
-    
-    processed_count = 0
-    examples_to_show = 4
-    examples_shown_desc = 0
-    examples_shown_match = 0
+    print("🔍 ANALYZING PIECE COMPATIBILITY - Comparing all edges...")
     
     for dir_name, dir_images in images_by_dir.items():
         puzzle_output_dir = os.path.join(output_dir, dir_name if dir_name != 'root' else 'main_images')
@@ -901,103 +934,102 @@ if 'images_by_dir' in locals():
         if not os.path.exists(rectangular_dir):
             continue
             
-        print(f"\n📁 Analyzing pieces in: {rectangular_dir}")
+        print(f"\n📁 Analyzing puzzle pieces from: {rectangular_dir}")
         
         piece_files = sorted([f for f in os.listdir(rectangular_dir) if f.startswith("piece_") and f.endswith(('.png', '.jpg'))])
         if not piece_files:
             continue
 
+        # FIXED: Group pieces by puzzle correctly for "piece_4_97.jpg" format
         pieces_by_puzzle = {}
         for p_file in piece_files:
             parts = p_file.split('_')
-            original_name = "_".join(parts[2:]) 
-            pieces_by_puzzle.setdefault(original_name, []).append(p_file)
+            # For "piece_4_97.jpg": parts = ["piece", "4", "97.jpg"]
+            if len(parts) >= 3:
+                puzzle_id = parts[2].split('.')[0]  # Take "97" from "97.jpg"
+                pieces_by_puzzle.setdefault(puzzle_id, []).append(p_file)
+        
+        for puzzle_id, pieces in pieces_by_puzzle.items():
+            # FIXED: Sort pieces correctly - use the middle number "4", "3", "2", "1"
+            pieces.sort(key=lambda x: int(x.split('_')[1]))  # "piece_4_97.jpg" -> "4"
             
-        # Process each puzzle group
-        for puzzle_name, pieces in pieces_by_puzzle.items():
+            print(f"\n--- 🧩 ANALYSIS: Puzzle {puzzle_id} ({len(pieces)} pieces) ---")
+            print(f"   Pieces in order: {pieces}")
             
-            pieces.sort(key=lambda x: int(x.split('_')[1]))
-            
-            # --- 1. DETECT GRID SIZE FOR SOLVING LOGIC ---
-            N = 2 
-            if '2x2' in dir_name.lower() or '4' in pieces[0]: N = 2
-            if '4x4' in dir_name.lower() or '16' in pieces[0]: N = 4
-            if '8x8' in dir_name.lower() or '64' in pieces[0]: N = 8
-
-            # Try to guess N based on total pieces if possible
-            if len(pieces) > 0:
-                potential_N = int(np.sqrt(len(pieces)))
-                if potential_N in [2, 3, 4, 8]: N = potential_N
+            # Detect grid size based on number of pieces
+            num_pieces = len(pieces)
+            if num_pieces == 4:
+                N = 2  # 2x2 puzzle
+            elif num_pieces == 16:
+                N = 4  # 4x4 puzzle  
+            elif num_pieces == 64:
+                N = 8  # 8x8 puzzle
+            else:
+                N = int(np.sqrt(num_pieces))  # Try to guess
+                print(f"   ⚠️ Unusual piece count: {num_pieces}, assuming {N}x{N}")
             
             total_pieces = N * N
             
-            print(f"\n--- 🧩 PUZZLE: {puzzle_name} ({N}x{N} Grid, {len(pieces)} pieces) ---")
+            if len(pieces) != total_pieces:
+                print(f"   ⚠️ Skipping: {len(pieces)} pieces, expected {total_pieces} for {N}x{N}")
+                continue
             
-            # --- 2. DESCRIPTOR VISUALIZATION (Piece 1) ---
-            if examples_shown_desc < examples_to_show and pieces:
-                first_piece_path = os.path.join(rectangular_dir, pieces[0])
-                first_piece_img = cv2.imread(first_piece_path)
-                
-                if first_piece_img is not None:
-                    print(f"   🧩 Visualizing all 4 descriptors for: {pieces[0]}")
-                    raw_edges = extract_rectangular_edges(first_piece_img)
+            # Load all pieces and extract descriptors
+            all_piece_data = []
+            all_piece_images = []
+            
+            for piece_file in pieces:
+                piece_path = os.path.join(rectangular_dir, piece_file)
+                piece_img = cv2.imread(piece_path)
+                if piece_img is not None:
+                    raw_edges = extract_rectangular_edges(piece_img)
                     descriptors = {k: describe_edge_color_pattern(v) for k, v in raw_edges.items()}
-                    visualize_piece_descriptors(first_piece_img, descriptors, pieces[0])
-                    examples_shown_desc += 1
-
-
-            # --- 3. CORRECT MATCH ANALYSIS & VISUALIZATION ---
-            if len(pieces) == total_pieces and examples_shown_match < 4: # Only show one visual match example
-                print(f"   📐 Visualizing Correct Sequential Matches (Piece 1 <-> Piece 2 and P1 <-> P(1+N))")
-                
-                # Check 2 pairs (Piece 1 -> Piece 2 and Piece N -> Piece N+1)
-                comparison_indices = [
-                    (0, 1, "Horizontal"),                         # Horizontal Check (P1 -> P2)
-                    (0, N, "Vertical")                            # Vertical Check (P1 -> P(1+N))
-                ]
-                
-                for idx1, idx2, match_type in comparison_indices:
-                    if idx2 < len(pieces):
-                        p1_file = pieces[idx1]
-                        p2_file = pieces[idx2]
-                        
-                        p1_img = cv2.imread(os.path.join(rectangular_dir, p1_file))
-                        p2_img = cv2.imread(os.path.join(rectangular_dir, p2_file))
-                        
-                        if p1_img is not None and p2_img is not None:
-                            edges1 = extract_rectangular_edges(p1_img)
-                            edges2 = extract_rectangular_edges(p2_img)
-                            
-                            if match_type == "Horizontal":
-                                # Compare P1 Right to P2 Left (The correct sequential match)
-                                desc1 = describe_edge_color_pattern(edges1['right'])
-                                desc2 = describe_edge_color_pattern(edges2['left'])
-                                score = compare_edges(desc1, desc2[::-1]) # Reverse desc2 for true comparison
-                                
-                                print(f"      • P{idx1+1} Right <-> P{idx2+1} Left (Correct Match): Score: {score:.4f}")
-                                visualize_correct_match(p1_img, p2_img, desc1, desc2, score, match_type)
-                                
-                            elif match_type == "Vertical":
-                                # Compare P1 Bottom to P2 Top (The correct sequential match)
-                                desc1 = describe_edge_color_pattern(edges1['bottom'])
-                                desc2 = describe_edge_color_pattern(edges2['top'])
-                                score = compare_edges(desc1, desc2)
-                                
-                                print(f"      • P{idx1+1} Bottom <-> P{idx2+1} Top (Correct Match): Score: {score:.4f}")
-                                visualize_correct_match(p1_img, p2_img, desc1, desc2, score, match_type)
-
-                            examples_shown_match += 1
-                
-                print("   ---")
-            else:
-                if len(pieces) != total_pieces:
-                    print(f"   ⚠️ Skipping sequential check: Found {len(pieces)} pieces, expected {total_pieces}.")
-                
-            processed_count += 1
-            if processed_count >= 5: break # Limit output for log cleanliness
+                    all_piece_data.append(descriptors)
+                    all_piece_images.append(piece_img)
+                else:
+                    print(f"   ❌ Failed to load: {piece_file}")
+            
+            if len(all_piece_data) < 2:
+                print(f"   ⚠️ Not enough pieces loaded for analysis")
+                continue
+            
+            # Compare all pieces
+            all_comparisons = analyze_all_possible_matches(all_piece_data, pieces, N)
+            
+            # Show heatmap visualization
+            print(f"\n   📈 Generating compatibility heatmaps...")
+            horizontal_scores, vertical_scores = visualize_comparison_heatmap(
+                all_comparisons, pieces, N, f"Puzzle_{puzzle_id}"
+            )
+            
+            # Visualize a few best matches
+            print(f"\n   👀 Visualizing best match examples...")
+            best_matches = sorted(all_comparisons, key=lambda x: x['score'])[:3]  # Top 3 matches
+            
+            for match in best_matches:
+                piece1_idx, piece2_idx = match['piece1'], match['piece2']
+                if (piece1_idx < len(all_piece_images) and piece2_idx < len(all_piece_images)):
+                    print(f"   🎯 Showing: {match['label']} (Score: {match['score']:.4f})")
+                    visualize_best_match_pair(
+                        all_piece_images[piece1_idx],
+                        all_piece_images[piece2_idx], 
+                        all_piece_data[piece1_idx][match['edge1']],
+                        all_piece_data[piece2_idx][match['edge2']],
+                        match['score'],
+                        match
+                    )
+            
+            # Only process first puzzle for demo
+            break
+        
+        # Only process first directory for demo  
+        break
             
     print(f"\n" + "=" * 70)
-    print("PART 6 COMPLETE: Descriptors extracted and visually verified using correct adjacent pieces.")
+    print("COMPARISON ANALYSIS COMPLETE!")
+    print("✅ Compared ALL pieces against ALL other pieces") 
+    print("✅ Showed compatibility heatmaps")
+    print("✅ Displayed best matches visually")
     print("=" * 70)
 else:
-    print("❌ Previous steps not completed. Variables missing.")
+    print("❌ Previous steps not completed.")
