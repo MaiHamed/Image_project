@@ -78,103 +78,125 @@ def extract_generic_grid_pieces(img, N=2):
 
 #---------------- Descriptor--------------------
 
+def rotate_image_90_times(img, k):
+    k = k % 4
+    if k == 0:
+        return img.copy()
+    elif k == 1:
+        return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+    elif k == 2:
+        return cv2.rotate(img, cv2.ROTATE_180)
+    elif k == 3:
+        return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+
 def extract_rectangular_edges(piece_img):
-    #Extract all 4 edges from a rectangular puzzle piece
     if piece_img is None:
         return {}
-    height, width = piece_img.shape[:2]
+
+    h, w = piece_img.shape[:2]
     return {
-        'top': piece_img[0, :, :],
-        'bottom': piece_img[-1, :, :],  
-        'left': piece_img[:, 0, :],
-        'right': piece_img[:, -1, :]
+        'top': piece_img[0, :, :].copy(),
+        'bottom': piece_img[-1, :, :].copy(),
+        'left': piece_img[:, 0, :].copy(),
+        'right': piece_img[:, -1, :].copy()
     }
 
 def describe_edge_color_pattern(edge_pixels, target_length=100):
-    #Convert edge pixels to normalized intensity pattern
-    if len(edge_pixels) == 0:
+    if edge_pixels is None or len(edge_pixels) == 0:
         return np.array([])
-    
+
+    # grayscale
     if len(edge_pixels.shape) > 1 and edge_pixels.shape[1] == 3:
-        intensities = 0.299 * edge_pixels[:, 0] + 0.587 * edge_pixels[:, 1] + 0.114 * edge_pixels[:, 2]
+        intensities = (
+            0.299 * edge_pixels[:, 0] +
+            0.587 * edge_pixels[:, 1] +
+            0.114 * edge_pixels[:, 2]
+        )
     else:
         intensities = edge_pixels.flatten()
-    
+
     if len(intensities) < 2:
         return np.array([])
-        
+
     x_old = np.linspace(0, 1, len(intensities))
     x_new = np.linspace(0, 1, target_length)
     normalized = np.interp(x_new, x_old, intensities)
-    
-    if normalized.max() > normalized.min():
-        normalized = (normalized - normalized.min()) / (normalized.max() - normalized.min())
+
+    mn, mx = normalized.min(), normalized.max()
+    if mx > mn:
+        normalized = (normalized - mn) / (mx - mn)
     else:
         normalized = np.zeros(target_length)
-    
+
     return normalized
 
 def compare_edges(desc1, desc2):
-    #Compare two edge descriptors (lower = better match)
     if len(desc1) == 0 or len(desc2) == 0:
         return float('inf')
-    return np.mean((desc1 - desc2) ** 2)
 
-def analyze_all_possible_matches(all_pieces_data, piece_files, N):
-    #compare all pieces against all other pieces
-    print(f"   🔍 COMPARISON ANALYSIS for {N}x{N} puzzle:")
-    print(f"   Testing {len(all_pieces_data)} pieces against each other...")
-    
+    min_len = min(len(desc1), len(desc2))
+    return float(np.mean((desc1[:min_len] - desc2[:min_len]) ** 2))
+
+def best_score_between_descriptors(desc_a, desc_b):
+    if len(desc_a) == 0 or len(desc_b) == 0:
+        return float('inf')
+    return min(compare_edges(desc_a, desc_b),
+               compare_edges(desc_a, desc_b[::-1]))
+
+def analyze_all_possible_matches_rotation_aware(all_piece_images, piece_files, N):
+    all_piece_rotations = []
+
+    # Precompute:
+    for p_img in all_piece_images:
+        rotations = {}
+        for k in range(4):
+            angle = k * 90
+            img_rot = rotate_image_90_times(p_img, k)
+            raw_edges = extract_rectangular_edges(img_rot)
+            descriptors = {
+                e: describe_edge_color_pattern(raw_edges[e])
+                for e in raw_edges
+            }
+            rotations[angle] = {
+                'image': img_rot,
+                'descriptors': descriptors
+            }
+        all_piece_rotations.append(rotations)
+
     all_comparisons = []
-    
-    # Compare every piece with every other piece
-    for i in range(len(all_pieces_data)):
-        for j in range(len(all_pieces_data)):
-            if i == j:  # Skip comparing piece with itself
-                continue
-                
-            piece1_data = all_pieces_data[i]
-            piece2_data = all_pieces_data[j]
-            
-            # Compare all edge combinations
-            edge_pairs = [
-                ('right', 'left', 'P{i}→P{j}'),    # Horizontal neighbors
-                ('bottom', 'top', 'P{i}↓P{j}'),    # Vertical neighbors
-                ('left', 'right', 'P{i}←P{j}'),    # Reverse horizontal
-                ('top', 'bottom', 'P{i}↑P{j}')     # Reverse vertical
-            ]
-            
-            for edge1, edge2, label in edge_pairs:
-                if edge1 in piece1_data and edge2 in piece2_data:
-                    desc1 = piece1_data[edge1]
-                    desc2 = piece2_data[edge2]
-                    
-                    score = compare_edges(desc1, desc2)
-                    
-                    all_comparisons.append({
-                        'piece1': i, 'piece2': j,
-                        'edge1': edge1, 'edge2': edge2, 
-                        'score': score,
-                        'label': f"P{i+1} {edge1} ↔ P{j+1} {edge2}"
-                    })
-    
-    # Sort by best matches
-    all_comparisons.sort(key=lambda x: x['score'])
-    
-    # Show analysis results
-    print(f"\n   📊 MATCH ANALYSIS RESULTS:")
-    print(f"   Found {len(all_comparisons)} possible edge matches")
-    
-    # Show best matches
-    print(f"\n   🏆 TOP 15 BEST MATCHES:")
-    for idx, match in enumerate(all_comparisons[:15]):
-        quality = "🌟" if match['score'] < 0.01 else "✅" if match['score'] < 0.05 else "⚠️"
-        print(f"      {idx+1:2d}. {quality} {match['label']}: {match['score']:.4f}")
-    
-    # Show worst matches
-    print(f"\n   🔻 TOP 15 WORST MATCHES:")
-    for idx, match in enumerate(all_comparisons[-15:]):
-        print(f"      {idx+1:2d}. ❌ {match['label']}: {match['score']:.4f}")
-    
-    return all_comparisons
+    num = len(all_piece_images)
 
+    edge_pairs = [
+        ('right', 'left'),
+        ('bottom', 'top'),
+        ('left', 'right'),
+        ('top', 'bottom')
+    ]
+
+    # Compare:
+    for i in range(num):
+        for j in range(num):
+            if i == j:  
+                continue
+
+            piece1_desc = all_piece_rotations[i][0]['descriptors']
+
+            for angle, rot_data in all_piece_rotations[j].items():
+                piece2_desc = rot_data['descriptors']
+
+                for e1, e2 in edge_pairs:
+                    s = best_score_between_descriptors(
+                        piece1_desc[e1], piece2_desc[e2]
+                    )
+                    all_comparisons.append({
+                        'piece1': i,
+                        'piece2': j,
+                        'edge1': e1,
+                        'edge2': e2,
+                        'rotation_of_piece2': angle,
+                        'score': s,
+                        'label': f"P{i+1} {e1} ↔ P{j+1} {e2} (rot {angle}°)"
+                    })
+
+    all_comparisons.sort(key=lambda x: x['score'])
+    return all_comparisons, all_piece_rotations
