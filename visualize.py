@@ -7,11 +7,6 @@ import os
 def show_examples(examples, images_by_dir, output_dir):
     """
     Display before/after images with metrics and available processed folders.
-
-    Parameters:
-    - examples: list of dicts containing 'original', 'denoised', 'enhanced', 'edges_bw', 'filename', 'directory'
-    - images_by_dir: dict of directories and image info
-    - output_dir: path to processed images folder
     """
     print("\n" + "🔍" * 10 + " SHOW EXAMPLES & METRICS " + "🔍" * 10)
 
@@ -35,14 +30,15 @@ def show_examples(examples, images_by_dir, output_dir):
         print(f"✅ Will show {num_examples} examples")
     except ValueError:
         num_examples = min(3, len(examples))
-        print(f"⚠️ Invalid input. Showing {num_examples} examples by default")
+        print(f"⚠ Invalid input. Showing {num_examples} examples by default")
 
     # Show examples
     for i, example in enumerate(examples[:num_examples], 1):
-        print(f"\n🖼️ Example {i}/{num_examples}: {example['filename']}")
+        print(f"\n🖼 Example {i}/{num_examples}: {example['filename']}")
         print(f"📁 Location: {example['directory']}")
 
         plt.figure(figsize=(18, 6))
+        plt.suptitle(f"{example['filename']}", fontsize=16, fontweight='bold')  # <-- filename at top
 
         plt.subplot(1, 4, 1)
         plt.imshow(cv2.cvtColor(example['original'], cv2.COLOR_BGR2RGB))
@@ -64,7 +60,7 @@ def show_examples(examples, images_by_dir, output_dir):
         plt.title("Edges")
         plt.axis('off')
 
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0, 1, 0.95])  # leave space for suptitle
         plt.show()
 
         # Print image info
@@ -119,25 +115,25 @@ def visualize_generic_grid(original_img, pieces, N, filename):
 
     # Setup Plot
     plt.figure(figsize=(15, 6))
+    plt.suptitle(f"{filename}", fontsize=16, fontweight='bold')  # <-- filename at top
     
     # Left: The cut lines
     plt.subplot(1, 2, 1)
     plt.imshow(cv2.cvtColor(cut_viz, cv2.COLOR_BGR2RGB))
-    plt.title(f"Grid Slicing ({N}x{N}): {filename}", fontweight='bold')
+    plt.title(f"Grid Slicing ({N}x{N})", fontweight='bold')
     plt.axis('off')
     
     # Right: The extracted pieces in a grid
     plt.subplot(1, 2, 2)
     
     # Create a display grid
-    # Add gaps between pieces
     gap = 5
     piece_h, piece_w = pieces[0].shape[:2]
     
     grid_h = N * piece_h + (N-1) * gap
     grid_w = N * piece_w + (N-1) * gap
     
-    display_grid = np.zeros((grid_h, grid_w, 3), dtype=np.uint8) + 255 # White bg
+    display_grid = np.ones((grid_h, grid_w, 3), dtype=np.uint8) * 255  # White bg
     
     idx = 0
     for row in range(N):
@@ -145,10 +141,7 @@ def visualize_generic_grid(original_img, pieces, N, filename):
             if idx < len(pieces):
                 y = row * (piece_h + gap)
                 x = col * (piece_w + gap)
-                
-                # Resize strictly to match expected slot if slight variation
                 p = cv2.resize(pieces[idx], (piece_w, piece_h))
-                
                 display_grid[y:y+piece_h, x:x+piece_w] = p
                 idx += 1
     
@@ -156,107 +149,81 @@ def visualize_generic_grid(original_img, pieces, N, filename):
     plt.title(f"Extracted {N*N} Pieces", fontweight='bold')
     plt.axis('off')
     
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.95])  # leave space for suptitle
     plt.show()
+    
     return cut_viz
 
 def visualize_comparison_heatmap(all_comparisons, piece_files, N, puzzle_name):
-    #Create a heatmap showing how well pieces match each other
-    num_pieces = len(piece_files)
-    
-    # Create score matrices for different edge types
-    horizontal_scores = np.full((num_pieces, num_pieces), np.nan)
-    vertical_scores = np.full((num_pieces, num_pieces), np.nan)
-    
+    num = len(piece_files)
+    horizontal_scores = np.full((num, num), np.nan)
+    vertical_scores = np.full((num, num), np.nan)
+
     for match in all_comparisons:
         i, j = match['piece1'], match['piece2']
-        
         if match['edge1'] == 'right' and match['edge2'] == 'left':
             horizontal_scores[i, j] = match['score']
         elif match['edge1'] == 'bottom' and match['edge2'] == 'top':
             vertical_scores[i, j] = match['score']
-    
-    # Create the visualization
+
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 6))
-    
-    # Horizontal matches heatmap
+
     im1 = ax1.imshow(horizontal_scores, cmap='RdYlGn_r', aspect='auto')
-    ax1.set_title(f'Horizontal Match Scores\n(Piece Right ↔ Other Piece Left)', fontweight='bold')
-    ax1.set_xlabel('Other Piece Number')
-    ax1.set_ylabel('Piece Number')
-    ax1.set_xticks(range(num_pieces))
-    ax1.set_yticks(range(num_pieces))
-    ax1.set_xticklabels([f'P{i+1}' for i in range(num_pieces)])
-    ax1.set_yticklabels([f'P{i+1}' for i in range(num_pieces)])
-    plt.colorbar(im1, ax=ax1, label='Match Score (lower = better)')
-    
-    # Add score values to heatmap
-    for i in range(num_pieces):
-        for j in range(num_pieces):
-            if not np.isnan(horizontal_scores[i, j]):
-                ax1.text(j, i, f'{horizontal_scores[i, j]:.2f}', 
-                        ha='center', va='center', fontsize=8, 
-                        color='white' if horizontal_scores[i, j] > 0.5 else 'black')
-    
-    # Vertical matches heatmap
+    ax1.set_title("Horizontal Match Scores")
+    plt.colorbar(im1, ax=ax1)
+
     im2 = ax2.imshow(vertical_scores, cmap='RdYlGn_r', aspect='auto')
-    ax2.set_title(f'Vertical Match Scores\n(Piece Bottom ↔ Other Piece Top)', fontweight='bold')
-    ax2.set_xlabel('Other Piece Number')
-    ax2.set_ylabel('Piece Number')
-    ax2.set_xticks(range(num_pieces))
-    ax2.set_yticks(range(num_pieces))
-    ax2.set_xticklabels([f'P{i+1}' for i in range(num_pieces)])
-    ax2.set_yticklabels([f'P{i+1}' for i in range(num_pieces)])
-    plt.colorbar(im2, ax=ax2, label='Match Score (lower = better)')
-    
-    # Add score values to heatmap
-    for i in range(num_pieces):
-        for j in range(num_pieces):
+    ax2.set_title("Vertical Match Scores")
+    plt.colorbar(im2, ax=ax2)
+
+    # Add text on squares
+    hmin, hmax = np.nanmin(horizontal_scores), np.nanmax(horizontal_scores)
+    vmin, vmax = np.nanmin(vertical_scores), np.nanmax(vertical_scores)
+
+    for i in range(num):
+        for j in range(num):
+            if not np.isnan(horizontal_scores[i, j]):
+                threshold = hmin + 0.5 * (hmax - hmin)
+                ax1.text(j, i, f"{horizontal_scores[i, j]:.4f}",
+                         ha='center', va='center', fontsize=8,
+                         color='white' if horizontal_scores[i, j] > threshold else 'black')
             if not np.isnan(vertical_scores[i, j]):
-                ax2.text(j, i, f'{vertical_scores[i, j]:.2f}', 
-                        ha='center', va='center', fontsize=8,
-                        color='white' if vertical_scores[i, j] > 0.5 else 'black')
-    
-    plt.suptitle(f'Puzzle Match Analysis: {puzzle_name} ({N}x{N})', fontsize=16, fontweight='bold')
+                threshold = vmin + 0.5 * (vmax - vmin)
+                ax2.text(j, i, f"{vertical_scores[i, j]:.4f}",
+                         ha='center', va='center', fontsize=8,
+                         color='white' if vertical_scores[i, j] > threshold else 'black')
+
+    plt.suptitle(f"Puzzle Match Analysis: {puzzle_name}", fontsize=16)
     plt.tight_layout()
     plt.show()
-    
+
     return horizontal_scores, vertical_scores
 
-def visualize_best_match_pair(piece1_img, piece2_img, desc1, desc2, score, match_info):
-    #Visualize one good match pair
-    piece1_num = match_info['piece1'] + 1
-    piece2_num = match_info['piece2'] + 1
-    
+
+def visualize_best_match_pair(piece1_img, piece2_img, desc1, desc2, score, info):
+    p1 = info['piece1'] + 1
+    p2 = info['piece2'] + 1
+
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 4))
-    
-    # Show pieces separately
+
     ax1.imshow(cv2.cvtColor(piece1_img, cv2.COLOR_BGR2RGB))
-    ax1.set_title(f'Piece {piece1_num}\n{match_info["edge1"]} edge', fontweight='bold')
+    ax1.set_title(f"Piece {p1}\n{info['edge1']}")
     ax1.axis('off')
-    
+
     ax2.imshow(cv2.cvtColor(piece2_img, cv2.COLOR_BGR2RGB))
-    ax2.set_title(f'Piece {piece2_num}\n{match_info["edge2"]} edge', fontweight='bold')
+    ax2.set_title(f"Piece {p2}\n{info['edge2']} (rot {info['rotation_of_piece2']}°)")
     ax2.axis('off')
-    
-    # Show descriptor comparison
-    if match_info['edge1'] == 'right' and match_info['edge2'] == 'left':
-        # For horizontal match, reverse the second descriptor
+
+    if info['edge1'] == 'right' and info['edge2'] == 'left':
         desc2_plot = desc2[::-1]
-        match_type = "Horizontal"
     else:
         desc2_plot = desc2
-        match_type = "Vertical"
-    
-    ax3.plot(desc1, 'b-', label=f'P{piece1_num} {match_info["edge1"]}', linewidth=2)
-    ax3.plot(desc2_plot, 'r--', label=f'P{piece2_num} {match_info["edge2"]}', linewidth=2, alpha=0.7)
-    ax3.set_title(f'Descriptor Comparison\n{match_type} Match\nScore: {score:.4f}')
-    ax3.set_xlabel('Position along edge')
-    ax3.set_ylabel('Normalized Intensity')
+
+    ax3.plot(desc1, label="Piece 1")
+    ax3.plot(desc2_plot, label="Piece 2")
+    ax3.set_title(f"Score = {score:.4f}")
     ax3.legend()
-    ax3.grid(True, alpha=0.3)
-    ax3.set_ylim(0, 1)
-    
+    ax3.grid(True)
+
     plt.tight_layout()
     plt.show()
-

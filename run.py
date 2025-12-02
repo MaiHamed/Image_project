@@ -12,7 +12,7 @@ from functions import (
     selective_median_filter, enhance_image,
     detect_grid_size, extract_generic_grid_pieces,
     extract_rectangular_edges, describe_edge_color_pattern,
-    analyze_all_possible_matches
+    analyze_all_possible_matches_rotation_aware
 )
 
 from visualize import (
@@ -194,113 +194,118 @@ def main():
         else:
             print("❌ No images found for cropping.")
     
-    # 5️⃣ RUN COMPARISON ANALYSIS
+    # 5️⃣ RUN COMPARISON ANALYSIS (Rotation-Aware)
     if 'images_by_dir' in locals():
-        print("🔍 ANALYZING PIECE COMPATIBILITY - Comparing all edges...")
-        
+        print("🔍 ANALYZING PIECE COMPATIBILITY - Rotation-aware matching enabled...")
+
         for dir_name, dir_images in images_by_dir.items():
             puzzle_output_dir = os.path.join(output_dir, dir_name if dir_name != 'root' else 'main_images')
             rectangular_dir = os.path.join(puzzle_output_dir, "rectangular_pieces")
-            
+
             if not os.path.exists(rectangular_dir):
                 continue
-                
+
             print(f"\n📁 Analyzing puzzle pieces from: {rectangular_dir}")
-            
-            piece_files = sorted([f for f in os.listdir(rectangular_dir) if f.startswith("piece_") and f.endswith(('.png', '.jpg'))])
+
+            # load piece files
+            piece_files = sorted(
+                [f for f in os.listdir(rectangular_dir) if f.startswith("piece_") and f.endswith(('.png', '.jpg'))]
+            )
             if not piece_files:
                 continue
 
-            # Group pieces by puzzle correctly
+            # group by puzzle id (piece_4_97.jpg → id = 97)
             pieces_by_puzzle = {}
             for p_file in piece_files:
                 parts = p_file.split('_')
                 if len(parts) >= 3:
                     puzzle_id = parts[2].split('.')[0]
                     pieces_by_puzzle.setdefault(puzzle_id, []).append(p_file)
-            
+
+            # For demo, only process first puzzle
             for puzzle_id, pieces in pieces_by_puzzle.items():
-                pieces.sort(key=lambda x: int(x.split('_')[1]))  # sort by piece number
-                
+
+                # sort by middle number (piece_4_97.jpg → sort by 4)
+                pieces.sort(key=lambda x: int(x.split('_')[1]))
                 print(f"\n--- 🧩 ANALYSIS: Puzzle {puzzle_id} ({len(pieces)} pieces) ---")
                 print(f"   Pieces in order: {pieces}")
-                
-                # Detect grid size
+
+                # detect puzzle grid size
                 num_pieces = len(pieces)
-                if num_pieces == 4:
-                    N = 2
-                elif num_pieces == 16:
-                    N = 4
-                elif num_pieces == 64:
-                    N = 8
-                else:
-                    N = int(np.sqrt(num_pieces))
-                    print(f"   ⚠️ Unusual piece count: {num_pieces}, assuming {N}x{N}")
-                
-                total_pieces = N * N
-                if len(pieces) != total_pieces:
-                    print(f"   ⚠️ Skipping: {len(pieces)} pieces, expected {total_pieces} for {N}x{N}")
+                N = int(np.sqrt(num_pieces))
+                if N * N != num_pieces:
+                    print(f"   ⚠️ Puzzle skipped: expected {N*N} pieces, found {num_pieces}")
                     continue
-                
-                # Load pieces and extract descriptors
-                all_piece_data = []
+
+                # load images
                 all_piece_images = []
-                
                 for piece_file in pieces:
-                    piece_path = os.path.join(rectangular_dir, piece_file)
-                    piece_img = cv2.imread(piece_path)
-                    if piece_img is not None:
-                        raw_edges = extract_rectangular_edges(piece_img)
-                        descriptors = {k: describe_edge_color_pattern(v) for k, v in raw_edges.items()}
-                        all_piece_data.append(descriptors)
-                        all_piece_images.append(piece_img)
-                    else:
+                    img = cv2.imread(os.path.join(rectangular_dir, piece_file))
+                    if img is None:
                         print(f"   ❌ Failed to load: {piece_file}")
-                
-                if len(all_piece_data) < 2:
-                    print(f"   ⚠️ Not enough pieces loaded for analysis")
+                    all_piece_images.append(img)
+
+                if len(all_piece_images) < 2:
+                    print("   ⚠️ Not enough pieces loaded for analysis")
                     continue
-                
-                # Compare all pieces
-                all_comparisons = analyze_all_possible_matches(all_piece_data, pieces, N)
-                
-                # Show heatmap
-                print(f"\n   📈 Generating compatibility heatmaps...")
+
+                print("   🌀 Running rotation-aware edge comparison...")
+                all_comparisons, all_piece_rotations = analyze_all_possible_matches_rotation_aware(
+                    all_piece_images, pieces, N
+                )
+
+                # heatmaps
+                print("\n   📈 Generating compatibility heatmaps...")
                 horizontal_scores, vertical_scores = visualize_comparison_heatmap(
                     all_comparisons, pieces, N, f"Puzzle_{puzzle_id}"
                 )
-                
-                # Show top matches
-                print(f"\n   👀 Visualizing best match examples...")
-                best_matches = sorted(all_comparisons, key=lambda x: x['score'])[:3]
-                
-                for match in best_matches:
-                    piece1_idx, piece2_idx = match['piece1'], match['piece2']
-                    if piece1_idx < len(all_piece_images) and piece2_idx < len(all_piece_images):
-                        print(f"   🎯 Showing: {match['label']} (Score: {match['score']:.4f})")
-                        visualize_best_match_pair(
-                            all_piece_images[piece1_idx],
-                            all_piece_images[piece2_idx],
-                            all_piece_data[piece1_idx][match['edge1']],
-                            all_piece_data[piece2_idx][match['edge2']],
-                            match['score'],
-                            match
-                        )
-                
-                # Only first puzzle for demo
+
+                # visualize first 3 images in folder as demo
+                print("\n   👀 Visualizing demo matches for FIRST 3 PIECES...")
+                demo_indices = list(range(min(3, len(all_piece_images))))
+
+                for idx in demo_indices:
+                    # find best match involving this piece
+                    matches_for_piece = [m for m in all_comparisons if m['piece1'] == idx]
+                    if not matches_for_piece:
+                        continue
+
+                    best = sorted(matches_for_piece, key=lambda x: x['score'])[0]
+                    p1_idx, p2_idx = best['piece1'], best['piece2']
+                    rot_angle = best.get('rotation_of_piece2', 0)
+
+                    desc1 = all_piece_rotations[p1_idx][0]['descriptors'][best['edge1']]
+                    desc2 = all_piece_rotations[p2_idx][rot_angle]['descriptors'][best['edge2']]
+                    desc2_plot = desc2[::-1] if best['edge1'] == 'right' and best['edge2'] == 'left' else desc2
+
+                    print(f"   🎯 Demo: Piece {p1_idx+1} best match → Piece {p2_idx+1} "
+                        f"(Score: {best['score']:.4f}, Rot={rot_angle}°)")
+
+                    visualize_best_match_pair(
+                        all_piece_rotations[p1_idx][0]['image'],
+                        all_piece_rotations[p2_idx][rot_angle]['image'],
+                        desc1,
+                        desc2_plot,
+                        best['score'],
+                        best
+                    )
+
+                # only first puzzle for demo
                 break
-            
-            # Only first directory for demo
+
+            # only first directory for demo
             break
-                
-        print(f"\n" + "=" * 70)
+
+        print("\n" + "=" * 70)
         print("COMPARISON ANALYSIS COMPLETE!")
-        print("✅ Compared ALL pieces against ALL other pieces") 
-        print("✅ Showed compatibility heatmaps")
-        print("✅ Displayed best matches visually")
+        print("✅ Rotation-aware matching used")
+        print("✅ Heatmaps generated")
+        print("✅ Demo visualizations for first three pieces shown")
         print("=" * 70)
+
     else:
         print("❌ Previous steps not completed.")
+
 
         
 if __name__ == "__main__":
