@@ -3,27 +3,27 @@ import numpy as np
 
 # ------------------ FILTERING FUNCTIONS ------------------
 def selective_median_filter(img, threshold=50):
-    if len(img.shape) == 3:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # Use the optimized OpenCV version instead of manual loops for speed/consistency
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img.copy()
+    median_gray = cv2.medianBlur(gray, 3)
+    diff = cv2.absdiff(gray, median_gray)
+    
+    mask = diff > threshold
+    result = img.copy()
+    
+    if img.ndim == 3:
+        median_color = cv2.medianBlur(img, 3)
+        result[mask] = median_color[mask]
     else:
-        gray = img.copy()
+        result[mask] = median_gray[mask]
+    
+    return result
 
-    denoised = img.copy()
-
-    for i in range(1, img.shape[0]-1):
-        for j in range(1, img.shape[1]-1):
-            neighborhood = gray[i-1:i+2, j-1:j+2]
-            median_val = np.median(neighborhood)
-            current_pixel = gray[i, j]
-
-            if abs(current_pixel - median_val) > threshold:
-                if len(img.shape) == 3:
-                    color_neighborhood = img[i-1:i+2, j-1:j+2]
-                    denoised[i, j] = np.median(color_neighborhood, axis=(0,1))
-                else:
-                    denoised[i, j] = median_val
-
-    return denoised
+def gamma_correction(img, gamma=0.9):
+    inv_gamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** inv_gamma) * 255
+                      for i in np.arange(256)]).astype("uint8")
+    return cv2.LUT(img, table)
 
 def canny_edges(img, low_threshold=50, high_threshold=150):
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
@@ -31,24 +31,63 @@ def canny_edges(img, low_threshold=50, high_threshold=150):
     edges = cv2.Canny(gray_blur, low_threshold, high_threshold)
     return edges
 
-def enhance_image(img, low_threshold=50, high_threshold=150):
-    enhanced = img.copy()
-
-    lab = cv2.cvtColor(enhanced, cv2.COLOR_BGR2LAB)
+def clahe_contrast(img, clip_limit=2.0, tile_grid_size=(8, 8)):
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+
+    clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=tile_grid_size)
     l_eq = clahe.apply(l)
-    lab_eq = cv2.merge((l_eq, a, b))
-    enhanced = cv2.cvtColor(lab_eq, cv2.COLOR_LAB2BGR)
 
-    lap = cv2.Laplacian(enhanced, cv2.CV_32F)
+    # Return the enhanced Luminance channel and the original A/B channels
+    return l_eq, a, b
+
+def estimate_noise(img):
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if img.ndim == 3 else img.copy()
+    lap = cv2.Laplacian(gray, cv2.CV_64F)
+    return lap.var()
+
+def enhance_image(
+    img, 
+    apply_denoise=False, 
+    denoise_threshold=60, 
+    gamma=0.9,          
+    sharpen_factor=0.08,   
+    low_threshold=50, 
+    high_threshold=150
+):
+    
+    # 0. Initial Denoising (Optional)
+    if apply_denoise:
+        # Use the separate selective_median_filter function
+        processing_img = selective_median_filter(img, threshold=denoise_threshold)
+    else:
+        processing_img = img.copy()
+        
+    # 1. Apply CLAHE (returns L_eq, A, B channels)
+    l_eq, a, b = clahe_contrast(processing_img)
+    
+    # 2. Subtle Sharpening on L-channel (for detail preservation)
+    
+    # Blur L_eq before Laplacian to target broader features/edges
+    blurred_l = cv2.GaussianBlur(l_eq, (3, 3), 0)
+    lap = cv2.Laplacian(blurred_l, cv2.CV_32F)
     lap -= lap.mean()
-    sharpened = enhanced - 0.1 * lap
-    sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
+    
+    # Sharpen the equalized Luminance channel
+    l_sharpened = l_eq.astype(np.float32) - sharpen_factor * lap
+    l_sharpened = np.clip(l_sharpened, 0, 255).astype(np.uint8)
 
-    edges_bw = canny_edges(sharpened, low_threshold, high_threshold)
-    return sharpened, edges_bw
-
+    # 3. Merge L, A, B channels and convert back to BGR
+    lab_merged = cv2.merge((l_sharpened, a, b))
+    enhanced_bgr = cv2.cvtColor(lab_merged, cv2.COLOR_LAB2BGR)
+    
+    # 4. Lightness Control (Gamma Correction)
+    final_enhanced = gamma_correction(enhanced_bgr, gamma=gamma)
+    
+    # 5. Edge Detection
+    edges_bw = canny_edges(final_enhanced, low_threshold, high_threshold)
+    
+    return final_enhanced, edges_bw
 
 # ------------------ GRID CROPPING ------------------
 def detect_grid_size(filename, dirname, default_n=2):

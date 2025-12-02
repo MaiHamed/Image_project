@@ -9,7 +9,7 @@ from tkinter.filedialog import askopenfilename
 
 # ---------------- IMPORT FUNCTIONS ----------------
 from functions import (
-    selective_median_filter, enhance_image,
+    selective_median_filter, enhance_image, estimate_noise,
     detect_grid_size, extract_generic_grid_pieces,
     extract_rectangular_edges, describe_edge_color_pattern,
     analyze_all_possible_matches_rotation_aware
@@ -71,6 +71,16 @@ def main():
         dir_name = img['directory'] if img['directory'] != '.' else 'root'
         images_by_dir.setdefault(dir_name, []).append(img)
 
+        # Sort images inside each directory numerically if possible
+        for dir_name, dir_images in images_by_dir.items():
+            images_by_dir[dir_name] = sorted(
+                dir_images,
+                key=lambda x: int(os.path.splitext(x['filename'])[0])
+                if os.path.splitext(x['filename'])[0].isdigit()
+                else x['filename']
+            )
+
+
     print(f"\n📊 Found {len(image_files)} images in {len(images_by_dir)} directories")
     print("="*50)
 
@@ -103,9 +113,28 @@ def main():
                 print(f"   ❌ Failed to load {filename}")
                 continue
 
-            denoised = selective_median_filter(img, threshold=50)
-            enhanced, edges_bw = enhance_image(denoised, low_threshold=50, high_threshold=150)
+            # Estimate noise
+            noise_level = estimate_noise(img)
 
+            if noise_level > 150:
+                denoise_threshold = 130
+                apply_denoise = True
+            else:
+                denoise_threshold = 0
+                apply_denoise = False
+
+            # 2. Apply selective median filter ONCE (if needed)
+            if apply_denoise:
+                # This filter will now only touch the most severe outliers due to the high threshold (60)
+                denoised = selective_median_filter(img, threshold=denoise_threshold)
+            else:
+                denoised = img.copy()
+
+            # 3. Enhance image (using the gamma value from the previous fix)
+            GAMMA_VALUE = 0.9
+            enhanced, edges_bw = enhance_image(denoised, apply_denoise, denoise_threshold,GAMMA_VALUE, 0.08, low_threshold=50, high_threshold=150)
+
+            # 4. Save outputs
             cv2.imwrite(os.path.join(orig_dir, filename), img)
             cv2.imwrite(os.path.join(denoise_dir, filename), denoised)
             cv2.imwrite(os.path.join(enhance_dir, filename), enhanced)
@@ -120,6 +149,7 @@ def main():
                 'directory': dir_name
             })
             total_successful += 1
+
 
             if i <= 5 or i == len(dir_images):
                 print(f"   ✅ [{i}/{len(dir_images)}] {filename}")
@@ -136,8 +166,17 @@ def main():
         print("\n🔍 Executing Generic Grid Cropping...")
         print("   Method: Auto-detecting 2x2, 4x4, or 8x8 based on folder/filenames")
 
+        total_images = sum(len(v) for v in images_by_dir.values())
 
-        examples_to_show = 2  # number of visualizations
+        # Ask user how many examples to visualize
+        try:
+            examples_to_show = int(input(f"\nHow many grid-cropping examples do you want to see? (1–{total_images}): "))
+            examples_to_show = max(1, min(examples_to_show, total_images))
+            print(f"✅ Will show {examples_to_show} grid examples")
+        except ValueError:
+            examples_to_show = min(3, total_images)
+            print(f"⚠ Invalid input. Showing {examples_to_show} examples by default")
+
         total_pieces_extracted = 0
         processed_count = 0
 
