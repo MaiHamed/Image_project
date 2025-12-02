@@ -7,11 +7,6 @@ import os
 def show_examples(examples, images_by_dir, output_dir):
     """
     Display before/after images with metrics and available processed folders.
-
-    Parameters:
-    - examples: list of dicts containing 'original', 'denoised', 'enhanced', 'edges_bw', 'filename', 'directory'
-    - images_by_dir: dict of directories and image info
-    - output_dir: path to processed images folder
     """
     print("\n" + "🔍" * 10 + " SHOW EXAMPLES & METRICS " + "🔍" * 10)
 
@@ -43,6 +38,7 @@ def show_examples(examples, images_by_dir, output_dir):
         print(f"📁 Location: {example['directory']}")
 
         plt.figure(figsize=(18, 6))
+        plt.suptitle(f"{example['filename']}", fontsize=16, fontweight='bold')  # <-- filename at top
 
         plt.subplot(1, 4, 1)
         plt.imshow(cv2.cvtColor(example['original'], cv2.COLOR_BGR2RGB))
@@ -64,7 +60,7 @@ def show_examples(examples, images_by_dir, output_dir):
         plt.title("Edges")
         plt.axis('off')
 
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0, 1, 0.95])  # leave space for suptitle
         plt.show()
 
         # Print image info
@@ -119,25 +115,25 @@ def visualize_generic_grid(original_img, pieces, N, filename):
 
     # Setup Plot
     plt.figure(figsize=(15, 6))
+    plt.suptitle(f"{filename}", fontsize=16, fontweight='bold')  # <-- filename at top
     
     # Left: The cut lines
     plt.subplot(1, 2, 1)
     plt.imshow(cv2.cvtColor(cut_viz, cv2.COLOR_BGR2RGB))
-    plt.title(f"Grid Slicing ({N}x{N}): {filename}", fontweight='bold')
+    plt.title(f"Grid Slicing ({N}x{N})", fontweight='bold')
     plt.axis('off')
     
     # Right: The extracted pieces in a grid
     plt.subplot(1, 2, 2)
     
     # Create a display grid
-    # Add gaps between pieces
     gap = 5
     piece_h, piece_w = pieces[0].shape[:2]
     
     grid_h = N * piece_h + (N-1) * gap
     grid_w = N * piece_w + (N-1) * gap
     
-    display_grid = np.zeros((grid_h, grid_w, 3), dtype=np.uint8) + 255 # White bg
+    display_grid = np.ones((grid_h, grid_w, 3), dtype=np.uint8) * 255  # White bg
     
     idx = 0
     for row in range(N):
@@ -145,10 +141,7 @@ def visualize_generic_grid(original_img, pieces, N, filename):
             if idx < len(pieces):
                 y = row * (piece_h + gap)
                 x = col * (piece_w + gap)
-                
-                # Resize strictly to match expected slot if slight variation
                 p = cv2.resize(pieces[idx], (piece_w, piece_h))
-                
                 display_grid[y:y+piece_h, x:x+piece_w] = p
                 idx += 1
     
@@ -156,8 +149,9 @@ def visualize_generic_grid(original_img, pieces, N, filename):
     plt.title(f"Extracted {N*N} Pieces", fontweight='bold')
     plt.axis('off')
     
-    plt.tight_layout()
+    plt.tight_layout(rect=[0, 0, 1, 0.95])  # leave space for suptitle
     plt.show()
+    
     return cut_viz
 
 def visualize_comparison_heatmap(all_comparisons, piece_files, N, puzzle_name):
