@@ -11,5 +11,6 @@ __pycache__/
 
 # Python virtual environment
 venv/
-env/
 
+# Puzzle images folder
+puzzle_images/__MACOSX/
