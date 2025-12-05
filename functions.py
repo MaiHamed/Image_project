@@ -141,34 +141,108 @@ def extract_rectangular_edges(piece_img):
     }
 
 def describe_edge_color_pattern(edge_pixels, target_length=100):
+    """
+    IMPROVED edge descriptor with multiple features
+    """
     if edge_pixels is None or len(edge_pixels) == 0:
         return np.array([])
-
-    # grayscale
+    
+    # Handle both color and grayscale
     if len(edge_pixels.shape) > 1 and edge_pixels.shape[1] == 3:
-        intensities = (
-            0.299 * edge_pixels[:, 0] +
-            0.587 * edge_pixels[:, 1] +
-            0.114 * edge_pixels[:, 2]
-        )
+        # Color image - extract multiple features
+        # 1. Grayscale intensity
+        gray = 0.299 * edge_pixels[:, 0] + 0.587 * edge_pixels[:, 1] + 0.114 * edge_pixels[:, 2]
+        
+        # 2. Color channels separately
+        r_channel = edge_pixels[:, 0].astype(np.float32)
+        g_channel = edge_pixels[:, 1].astype(np.float32)
+        b_channel = edge_pixels[:, 2].astype(np.float32)
+        
+        # 3. Edge gradients (for texture)
+        if len(gray) > 1:
+            grad = np.gradient(gray)
+        else:
+            grad = np.zeros_like(gray)
+        
+        # Combine features (normalize each)
+        features = []
+        
+        # Grayscale intensity
+        if len(gray) > 0:
+            gray_norm = (gray - gray.min()) / (gray.max() - gray.min() + 1e-10)
+            features.append(gray_norm)
+        
+        # Color ratios (capture color patterns)
+        color_sum = r_channel + g_channel + b_channel + 1e-10
+        r_ratio = r_channel / color_sum
+        g_ratio = g_channel / color_sum
+        
+        if len(r_ratio) > 0:
+            features.append(r_ratio)
+            features.append(g_ratio)
+        
+        # Gradient (edge information)
+        if len(grad) > 0:
+            grad_norm = (grad - grad.min()) / (grad.max() - grad.min() + 1e-10)
+            features.append(grad_norm)
+        
+        # Interpolate each feature to target length
+        combined = []
+        x_old = np.linspace(0, 1, len(gray))
+        x_new = np.linspace(0, 1, target_length)
+        
+        for feat in features:
+            if len(feat) > 1:
+                feat_interp = np.interp(x_new, x_old, feat)
+                combined.append(feat_interp)
+        
+        if combined:
+            # Stack features and normalize
+            combined_array = np.vstack(combined).mean(axis=0)  # Average features
+            if combined_array.max() > combined_array.min():
+                combined_array = (combined_array - combined_array.min()) / (combined_array.max() - combined_array.min())
+            return combined_array
+        else:
+            return np.zeros(target_length)
+    
     else:
-        intensities = edge_pixels.flatten()
-
-    if len(intensities) < 2:
-        return np.array([])
-
-    x_old = np.linspace(0, 1, len(intensities))
-    x_new = np.linspace(0, 1, target_length)
-    normalized = np.interp(x_new, x_old, intensities)
-
-    mn, mx = normalized.min(), normalized.max()
-    if mx > mn:
-        normalized = (normalized - mn) / (mx - mn)
-    else:
-        normalized = np.zeros(target_length)
-
-    return normalized
-
+        # Grayscale image
+        intensities = edge_pixels.flatten().astype(np.float32)
+        
+        if len(intensities) < 2:
+            return np.zeros(target_length)
+        
+        # Add gradient feature for grayscale too
+        if len(intensities) > 1:
+            grad = np.gradient(intensities)
+        else:
+            grad = np.zeros_like(intensities)
+        
+        # Normalize intensity
+        if intensities.max() > intensities.min():
+            intensities_norm = (intensities - intensities.min()) / (intensities.max() - intensities.min())
+        else:
+            intensities_norm = np.zeros_like(intensities)
+        
+        # Normalize gradient
+        if grad.max() > grad.min():
+            grad_norm = (grad - grad.min()) / (grad.max() - grad.min())
+        else:
+            grad_norm = np.zeros_like(grad)
+        
+        # Combine intensity and gradient (weighted)
+        combined = 0.7 * intensities_norm + 0.3 * grad_norm
+        
+        # Interpolate to target length
+        x_old = np.linspace(0, 1, len(combined))
+        x_new = np.linspace(0, 1, target_length)
+        normalized = np.interp(x_new, x_old, combined)
+        
+        # Final normalization
+        if normalized.max() > normalized.min():
+            normalized = (normalized - normalized.min()) / (normalized.max() - normalized.min())
+        
+        return normalized
 def compare_edges(desc1, desc2):
     if len(desc1) == 0 or len(desc2) == 0:
         return float('inf')
@@ -207,10 +281,8 @@ def analyze_all_possible_matches_rotation_aware(all_piece_images, piece_files, N
 
     edge_pairs = [
         ('right', 'left'),
-        ('bottom', 'top'),
-        ('left', 'right'),
-        ('top', 'bottom')
-    ]
+        ('bottom', 'top')
+        ]
 
     # Compare:
     for i in range(num):
@@ -239,3 +311,29 @@ def analyze_all_possible_matches_rotation_aware(all_piece_images, piece_files, N
 
     all_comparisons.sort(key=lambda x: x['score'])
     return all_comparisons, all_piece_rotations
+def debug_edge_descriptors(piece_images):
+    """
+    Debug function to check if edge descriptors are working properly
+    """
+    print("\n🔍 DEBUG: Edge Descriptor Analysis")
+    print("-" * 50)
+    
+    for i, img in enumerate(piece_images[:2]):  # Check first 2 pieces
+        print(f"\nPiece {i+1} (shape: {img.shape})")
+        
+        # Get edges
+        edges = extract_rectangular_edges(img)
+        
+        for edge_name, edge_pixels in edges.items():
+            # Show edge statistics
+            print(f"  {edge_name}: shape={edge_pixels.shape}")
+            
+            # Get descriptor
+            desc = describe_edge_color_pattern(edge_pixels)
+            print(f"    Descriptor length: {len(desc)}")
+            print(f"    Descriptor range: [{desc.min():.3f}, {desc.max():.3f}]")
+            print(f"    Descriptor mean: {desc.mean():.3f}")
+            
+            # Show first few values
+            if len(desc) > 0:
+                print(f"    First 5 values: {desc[:5]}")
