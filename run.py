@@ -345,7 +345,137 @@ def main():
     else:
         print("❌ Previous steps not completed.")
 
-
+        # 6️⃣ ASSEMBLE PUZZLE - FIXED VERSION
+    if 'images_by_dir' in locals():
+        print("\n" + "="*70)
+        print("🧩 ASSEMBLING PUZZLE FROM MATCHES")
+        print("="*70)
+        
+        # Import the new matching functions
+        try:
+            from Matching import (
+                assemble_puzzle_from_matches,
+                visualize_matches_with_lines,
+                visualize_assembly
+            )
+            print("✅ Successfully imported matching functions")
+        except ImportError as e:
+            print(f"❌ Failed to import matching functions: {e}")
+            return
+        
+        for dir_name, dir_images in images_by_dir.items():
+            puzzle_output_dir = os.path.join(output_dir, dir_name if dir_name != 'root' else 'main_images')
+            rectangular_dir = os.path.join(puzzle_output_dir, "rectangular_pieces")
+            
+            if not os.path.exists(rectangular_dir):
+                print(f"⚠️ No rectangular pieces found in {rectangular_dir}")
+                continue
+            
+            piece_files = sorted(
+                [f for f in os.listdir(rectangular_dir) if f.startswith("piece_") and f.endswith(('.png', '.jpg'))]
+            )
+            
+            if not piece_files:
+                print(f"⚠️ No piece files found in {rectangular_dir}")
+                continue
+            
+            # Group by puzzle (piece_4_97.jpg → puzzle id = 97)
+            pieces_by_puzzle = {}
+            for p_file in piece_files:
+                parts = p_file.split('_')
+                if len(parts) >= 3:
+                    puzzle_id = parts[2].split('.')[0]
+                    pieces_by_puzzle.setdefault(puzzle_id, []).append(p_file)
+            
+            # Process each puzzle
+            for puzzle_id, pieces in pieces_by_puzzle.items():
+                pieces.sort(key=lambda x: int(x.split('_')[1]))
+                
+                # Load piece images
+                piece_images = []
+                valid_pieces = []
+                for piece_file in pieces:
+                    img_path = os.path.join(rectangular_dir, piece_file)
+                    img = cv2.imread(img_path)
+                    if img is not None:
+                        piece_images.append(img)
+                        valid_pieces.append(piece_file)
+                    else:
+                        print(f"⚠️ Failed to load: {piece_file}")
+                
+                if len(piece_images) < 4:  # Need at least 2x2
+                    print(f"⚠️ Puzzle {puzzle_id}: Only {len(piece_images)} pieces, need at least 4")
+                    continue
+                print(f"   Loaded {len(piece_images)} pieces")
+                print(f"   Piece sizes: {[img.shape for img in piece_images]}")
+                print(f"   Number of comparisons generated: {len(all_comparisons)}")
+                
+                # Determine grid size
+                num_pieces = len(piece_images)
+                N = int(np.sqrt(num_pieces))
+                if N * N != num_pieces:
+                    print(f"⚠️ Puzzle {puzzle_id}: {num_pieces} pieces not a perfect square")
+                    continue
+                
+                print(f"\n" + "-"*60)
+                print(f"🧩 ASSEMBLING: Puzzle {puzzle_id} ({N}x{N}, {num_pieces} pieces)")
+                print(f"   Pieces: {valid_pieces}")
+                print("-"*60)
+                
+                # Get matches using the original analysis function
+                print("🔍 Running edge comparison analysis...")
+                all_comparisons, all_piece_rotations = analyze_all_possible_matches_rotation_aware(
+                    piece_images, valid_pieces, N
+                )
+                
+                if not all_comparisons:
+                    print("❌ No matches found!")
+                    continue
+                
+                # Visualize top matches with lines
+                print("\n📊 Visualizing best matches with connecting lines...")
+                visualize_matches_with_lines(piece_images, all_comparisons, top_n=10)
+                
+                # Assemble puzzle
+                print("\n🔧 Attempting to assemble puzzle...")
+                assembled_grid = assemble_puzzle_from_matches(all_comparisons, piece_images, N)
+                
+                if assembled_grid is None:
+                    print("❌ Failed to assemble puzzle")
+                    continue
+                
+                # Visualize assembly
+                print("\n🎨 Displaying assembled puzzle...")
+                assembled_img = visualize_assembly(assembled_grid, piece_images, N, 
+                                                   f"Assembled Puzzle {puzzle_id} ({N}x{N})")
+                
+                # Save assembled image
+                if assembled_img is not None:
+                    save_path = os.path.join(puzzle_output_dir, f"assembled_{puzzle_id}.jpg")
+                    cv2.imwrite(save_path, assembled_img)
+                    print(f"💾 Saved assembled image to: {save_path}")
+                
+                # Save match results to file
+                matches_file = os.path.join(puzzle_output_dir, f"matches_{puzzle_id}.txt")
+                with open(matches_file, 'w') as f:
+                    f.write(f"Match Results for Puzzle {puzzle_id} ({N}x{N})\n")
+                    f.write("="*50 + "\n")
+                    for i, match in enumerate(sorted(all_comparisons, key=lambda x: x['score'])[:20]):
+                        f.write(f"{i+1:2d}. P{match['piece1']+1} {match['edge1']} <-> P{match['piece2']+1} {match['edge2']}\n")
+                        f.write(f"    Rotation: {match['rotation_of_piece2']}°, Score: {match['score']:.6f}\n")
+                        f.write("-"*40 + "\n")
+                
+                print(f"📝 Match details saved to: {matches_file}")
+                
+                # Only process first puzzle for demo
+                break
+            
+            # Only process first directory for demo
+            break
+        
+        print("\n" + "="*70)
+        print("✅ ASSEMBLY COMPLETE!")
+        print("="*70)
         
 if __name__ == "__main__":
     main()
