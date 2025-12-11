@@ -225,3 +225,107 @@ def visualize_best_match_pair(piece1_img, piece2_img, desc1, desc2, score, info)
 
     plt.tight_layout()
     plt.show()
+
+# NEW: Add paper solver visualization
+def visualize_paper_solution(grid, piece_images, N, title="Paper Solver Solution"):
+    """
+    Visualize the solution from paper's algorithm
+    """
+    piece_height, piece_width = piece_images[0].shape[:2]
+    assembled_height = N * piece_height
+    assembled_width = N * piece_width
+    assembled = np.zeros((assembled_height, assembled_width, 3), dtype=np.uint8)
+    
+    for r in range(N):
+        for c in range(N):
+            piece_idx = grid[r][c]
+            if piece_idx is not None:
+                y_start = r * piece_height
+                x_start = c * piece_width
+                assembled[y_start:y_start+piece_height, 
+                         x_start:x_start+piece_width] = piece_images[piece_idx]
+    
+    # Draw grid lines
+    display_img = assembled.copy()
+    for i in range(1, N):
+        x = i * piece_width
+        cv2.line(display_img, (x, 0), (x, assembled_height), (0, 255, 0), 2)
+        y = i * piece_height
+        cv2.line(display_img, (0, y), (assembled_width, y), (0, 255, 0), 2)
+    
+    plt.figure(figsize=(8, 8))
+    plt.imshow(cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB))
+    plt.title(title, fontsize=14, fontweight='bold')
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+    
+    return assembled
+def visualize_matches_with_lines(piece_images, all_comparisons, top_n=10):
+    """
+    Visualize best matches by drawing connecting lines between pieces.
+    """
+    if not all_comparisons:
+        print("❌ No matches to visualize")
+        return
+    
+    # Sort matches by score (higher is better for paper's metric)
+    sorted_matches = sorted(all_comparisons, key=lambda x: x['score'], reverse=True)[:top_n]
+    
+    # Create visualization
+    fig, axes = plt.subplots(1, min(3, len(sorted_matches)), figsize=(15, 5))
+    if len(sorted_matches) == 1:
+        axes = [axes]
+    
+    for idx, match in enumerate(sorted_matches[:3]):  # Show first 3
+        p1_idx = match['piece1']
+        p2_idx = match['piece2']
+        
+        # Get images
+        from functions import rotate_image_90_times
+        p1_img = piece_images[p1_idx]
+        
+        # Handle rotation if specified
+        if 'rotation_of_piece2' in match:
+            rotation = match['rotation_of_piece2'] // 90
+            p2_img = rotate_image_90_times(piece_images[p2_idx], rotation)
+        else:
+            p2_img = piece_images[p2_idx]
+        
+        # Create side-by-side display
+        combined = np.hstack([p1_img, p2_img])
+        
+        axes[idx].imshow(cv2.cvtColor(combined, cv2.COLOR_BGR2RGB))
+        
+        # Add connecting line between matching edges
+        h, w = p1_img.shape[:2]
+        line_color = 'lime'
+        line_width = 3
+        
+        if match['edge1'] == 'right' and match['edge2'] == 'left':
+            # Draw line from right edge of piece1 to left edge of piece2
+            axes[idx].plot([w-5, w+5], [h//2, h//2], color=line_color, linewidth=line_width)
+        elif match['edge1'] == 'left' and match['edge2'] == 'right':
+            axes[idx].plot([5, w-5], [h//2, h//2], color=line_color, linewidth=line_width)
+        elif match['edge1'] == 'bottom' and match['edge2'] == 'top':
+            axes[idx].plot([w//2, w//2], [h-5, h+5], color=line_color, linewidth=line_width)
+        elif match['edge1'] == 'top' and match['edge2'] == 'bottom':
+            axes[idx].plot([w//2, w//2], [5, h-5], color=line_color, linewidth=line_width)
+        
+        axes[idx].set_title(f"Match {idx+1}: P{p1_idx+1}↔P{p2_idx+1}\nScore: {match['score']:.4f}")
+        axes[idx].axis('off')
+    
+    plt.suptitle(f"Top {min(3, len(sorted_matches))} Best Matches", fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.show()
+    
+    # Print match details
+    print(f"\n🔗 TOP {min(top_n, len(sorted_matches))} MATCHES:")
+    print("-" * 60)
+    for i, match in enumerate(sorted_matches[:top_n]):
+        print(f"{i+1:2d}. P{match['piece1']+1} {match['edge1']} ↔ P{match['piece2']+1} {match['edge2']}")
+        if 'rotation_of_piece2' in match:
+            print(f"    Rotation: {match['rotation_of_piece2']}°, Score: {match['score']:.6f}")
+        else:
+            print(f"    Score: {match['score']:.6f}")
+        print("-" * 60)

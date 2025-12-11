@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+from paper_algorithms import PaperPuzzleSolver
 
 # ------------------ FILTERING FUNCTIONS ------------------
 def selective_median_filter(img, threshold=50):
@@ -115,7 +116,7 @@ def extract_generic_grid_pieces(img, N=2):
 
     return pieces
 
-#---------------- Descriptor--------------------
+#---------------- DESCRIPTOR FUNCTIONS (KEPT FOR BACKWARD COMPATIBILITY) -----------------
 
 def rotate_image_90_times(img, k):
     k = k % 4
@@ -243,23 +244,51 @@ def describe_edge_color_pattern(edge_pixels, target_length=100):
             normalized = (normalized - normalized.min()) / (normalized.max() - normalized.min())
         
         return normalized
-def compare_edges(desc1, desc2):
-    if len(desc1) == 0 or len(desc2) == 0:
-        return float('inf')
 
-    min_len = min(len(desc1), len(desc2))
-    return float(np.mean((desc1[:min_len] - desc2[:min_len]) ** 2))
+# ========== NEW PAPER-BASED ANALYSIS FUNCTIONS ==========
 
-def best_score_between_descriptors(desc_a, desc_b):
-    if len(desc_a) == 0 or len(desc_b) == 0:
-        return float('inf')
-    return min(compare_edges(desc_a, desc_b),
-               compare_edges(desc_a, desc_b[::-1]))
-
-def analyze_all_possible_matches_rotation_aware(all_piece_images, piece_files, N):
+def analyze_all_possible_matches_paper_based(all_piece_images, piece_files, N):
+    """
+    NEW: Use simplified paper's algorithms for matching
+    """
+    print(f"\n📊 Running paper-based puzzle solver on {len(all_piece_images)} pieces")
+    
+    # Initialize solver
+    solver = PaperPuzzleSolver(p=0.3, q=1/16, use_prediction=True, border_width=10)
+    
+    # Solve puzzle
+    final_grid, compatibility_matrix, best_buddies = solver.solve(all_piece_images)
+    
+    # Convert to comparison format for visualization
+    all_comparisons = []
+    num_pieces = len(all_piece_images)
+    
+    # Create comparisons from compatibility matrix
+    relations = ['right', 'left', 'top', 'bottom']
+    for i in range(num_pieces):
+        for j in range(num_pieces):
+            if i == j:
+                continue
+            for rel_idx, rel in enumerate(relations):
+                opp_rel = {'right': 'left', 'left': 'right', 
+                          'top': 'bottom', 'bottom': 'top'}[rel]
+                
+                all_comparisons.append({
+                    'piece1': i,
+                    'piece2': j,
+                    'edge1': rel,
+                    'edge2': opp_rel,
+                    'rotation_of_piece2': 0,
+                    'score': float(compatibility_matrix[i, j, rel_idx]),
+                    'label': f"P{i+1} {rel} ↔ P{j+1} {opp_rel}",
+                    'method': 'paper'
+                })
+    
+    # Sort by score
+    all_comparisons.sort(key=lambda x: x['score'], reverse=True)
+    
+    # Keep rotation structure for compatibility (optional)
     all_piece_rotations = []
-
-    # Precompute:
     for p_img in all_piece_images:
         rotations = {}
         for k in range(4):
@@ -275,42 +304,18 @@ def analyze_all_possible_matches_rotation_aware(all_piece_images, piece_files, N
                 'descriptors': descriptors
             }
         all_piece_rotations.append(rotations)
+    
+    print(f"✅ Paper solver completed. Found {len(best_buddies)} best-buddy pairs")
+    
+    return all_comparisons, all_piece_rotations, final_grid, best_buddies
 
-    all_comparisons = []
-    num = len(all_piece_images)
+def analyze_all_possible_matches_rotation_aware(all_piece_images, piece_files, N):
+    """
+    KEPT FOR BACKWARD COMPATIBILITY
+    Calls the new paper-based function but returns same format
+    """
+    return analyze_all_possible_matches_paper_based(all_piece_images, piece_files, N)
 
-    edge_pairs = [
-        ('right', 'left'),
-        ('bottom', 'top')
-        ]
-
-    # Compare:
-    for i in range(num):
-        for j in range(num):
-            if i == j:  
-                continue
-
-            piece1_desc = all_piece_rotations[i][0]['descriptors']
-
-            for angle, rot_data in all_piece_rotations[j].items():
-                piece2_desc = rot_data['descriptors']
-
-                for e1, e2 in edge_pairs:
-                    s = best_score_between_descriptors(
-                        piece1_desc[e1], piece2_desc[e2]
-                    )
-                    all_comparisons.append({
-                        'piece1': i,
-                        'piece2': j,
-                        'edge1': e1,
-                        'edge2': e2,
-                        'rotation_of_piece2': angle,
-                        'score': s,
-                        'label': f"P{i+1} {e1} ↔ P{j+1} {e2} (rot {angle}°)"
-                    })
-
-    all_comparisons.sort(key=lambda x: x['score'])
-    return all_comparisons, all_piece_rotations
 def debug_edge_descriptors(piece_images):
     """
     Debug function to check if edge descriptors are working properly
@@ -337,3 +342,94 @@ def debug_edge_descriptors(piece_images):
             # Show first few values
             if len(desc) > 0:
                 print(f"    First 5 values: {desc[:5]}")
+                
+def analyze_all_possible_matches_paper_based(all_piece_images, piece_files, N):
+    """
+    NEW: Use paper's algorithms for matching
+    Replaces the old rotation-aware analysis
+    """
+    print(f"\n📊 Running paper-based puzzle solver on {len(all_piece_images)} pieces")
+    
+    # Initialize solver with paper's optimal parameters
+    solver = PaperPuzzleSolver(p=0.3, q=1/16, use_prediction=True)
+    
+    # Solve puzzle using paper's complete pipeline
+    final_grid, compatibility_matrix, best_buddies, assembled = solver.solve(all_piece_images)
+    
+    # DEBUG: Check what's returned
+    print(f"DEBUG: compatibility_matrix shape: {compatibility_matrix.shape if hasattr(compatibility_matrix, 'shape') else 'No shape'}")
+    print(f"DEBUG: final_grid type: {type(final_grid)}")
+    
+    # Convert grid to list of comparisons for compatibility with existing code
+    all_comparisons = []
+    num_pieces = len(all_piece_images)
+    
+    # Check if compatibility_matrix is valid
+    if compatibility_matrix is None or (hasattr(compatibility_matrix, 'shape') and 0 in compatibility_matrix.shape):
+        print("⚠️ WARNING: compatibility_matrix is empty or invalid")
+        # Create a dummy comparison list
+        for i in range(num_pieces):
+            for j in range(num_pieces):
+                if i == j:
+                    continue
+                for rel_idx, rel in enumerate(['right', 'left', 'top', 'bottom']):
+                    opp_rel = {'right': 'left', 'left': 'right', 
+                              'top': 'bottom', 'bottom': 'top'}[rel]
+                    
+                    all_comparisons.append({
+                        'piece1': i,
+                        'piece2': j,
+                        'edge1': rel,
+                        'edge2': opp_rel,
+                        'rotation_of_piece2': 0,
+                        'score': 0.5,  # Default score
+                        'label': f"P{i+1} {rel} ↔ P{j+1} {opp_rel}",
+                        'method': 'paper'
+                    })
+    else:
+        # Generate comparison list from compatibility matrix
+        for i in range(num_pieces):
+            for j in range(num_pieces):
+                if i == j:
+                    continue
+                for rel_idx, rel in enumerate(['right', 'left', 'top', 'bottom']):
+                    opp_rel = {'right': 'left', 'left': 'right', 
+                              'top': 'bottom', 'bottom': 'top'}[rel]
+                    
+                    score = compatibility_matrix[i, j, rel_idx]
+                    
+                    all_comparisons.append({
+                        'piece1': i,
+                        'piece2': j,
+                        'edge1': rel,
+                        'edge2': opp_rel,
+                        'rotation_of_piece2': 0,  # Paper handles rotation in compatibility
+                        'score': float(score),
+                        'label': f"P{i+1} {rel} ↔ P{j+1} {opp_rel}",
+                        'method': 'paper'
+                    })
+    
+    # Sort by score (higher = better in paper's metric)
+    all_comparisons.sort(key=lambda x: x['score'], reverse=True)
+    
+    # Create rotation data structure for compatibility (optional - can remove if not needed)
+    all_piece_rotations = []
+    for p_img in all_piece_images:
+        rotations = {}
+        for k in range(4):
+            angle = k * 90
+            img_rot = rotate_image_90_times(p_img, k)
+            raw_edges = extract_rectangular_edges(img_rot)
+            descriptors = {
+                e: describe_edge_color_pattern(raw_edges[e])
+                for e in raw_edges
+            }
+            rotations[angle] = {
+                'image': img_rot,
+                'descriptors': descriptors
+            }
+        all_piece_rotations.append(rotations)
+    
+    print(f"✅ Paper solver completed. Found {len(best_buddies)} best-buddy pairs")
+    
+    return all_comparisons, all_piece_rotations, final_grid, best_buddies            

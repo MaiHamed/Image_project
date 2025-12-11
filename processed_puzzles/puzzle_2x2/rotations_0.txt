@@ -1,0 +1,8 @@
+Piece Rotations for Puzzle 0 (2x2)
+==================================================
+Grid positions and rotations (0°, 90°, 180°, 270°):
+
+Position (0,0): Piece 4, Rotation: 90°
+Position (0,1): Piece 2, Rotation: 0°
+Position (1,0): Piece 3, Rotation: 180°
+Position (1,1): Piece 1, Rotation: 0°
