@@ -2,7 +2,9 @@ import matplotlib.pyplot as plt
 import cv2
 import numpy as np  
 import os
+from functions import assemble_grid_from_pieces, evaluate_corner_compatibility, evaluate_corner_compatibility_descriptor, evaluate_grid_compatibility
 
+#-------- GENERAL VISUALIZATION FUNCTIONS --------#
 def show_examples(examples, images_by_dir, output_dir):
     """
     Display before/after images with metrics and available processed folders.
@@ -153,6 +155,7 @@ def visualize_generic_grid(original_img, pieces, N, filename):
     
     return cut_viz
 
+#-------- PHASE 1: PIECE COMPARISON VISUALIZATION --------#
 def visualize_comparison_heatmap(all_comparisons, piece_files, N, puzzle_name):
     num = len(piece_files)
     horizontal_scores = np.full((num, num), np.nan)
@@ -226,7 +229,6 @@ def visualize_best_match_pair(piece1_img, piece2_img, desc1, desc2, score, info)
     plt.tight_layout()
     plt.show()
 
-# NEW: Add paper solver visualization
 def visualize_paper_solution(grid, piece_images, N, title="Paper Solver Solution"):
     """
     Visualize the solution from paper's algorithm
@@ -261,6 +263,7 @@ def visualize_paper_solution(grid, piece_images, N, title="Paper Solver Solution
     plt.show()
     
     return assembled
+
 def visualize_matches_with_lines(piece_images, all_comparisons, top_n=10):
     """
     Visualize best matches by drawing connecting lines between pieces.
@@ -329,3 +332,102 @@ def visualize_matches_with_lines(piece_images, all_comparisons, top_n=10):
         else:
             print(f"    Score: {match['score']:.6f}")
         print("-" * 60)
+
+#-------- PHASE 2: ASSEMBLY VISUALIZATION --------#
+def visualize_orientation_comparison(pieces, orientations, N, puzzle_id):
+    """
+    Simple visualization of all orientations
+    """
+    num_orientations = len(orientations)
+    fig, axes = plt.subplots(1, num_orientations, figsize=(5*num_orientations, 5))
+    
+    if num_orientations == 1:
+        axes = [axes]
+    
+    for idx, (ax, orientation) in enumerate(zip(axes, orientations)):
+        # Assemble this orientation
+        assembled = assemble_grid_from_pieces(pieces, orientation['grid'], N=N)
+        
+        if assembled is not None:
+            ax.imshow(cv2.cvtColor(assembled, cv2.COLOR_BGR2RGB))
+            ax.set_title(orientation['name'], fontsize=10)
+            ax.axis('off')
+    
+    plt.suptitle(f"Puzzle {puzzle_id}: All Orientations ({N}x{N})", fontsize=14, fontweight='bold')
+    plt.tight_layout()
+    plt.show()
+
+def visualize_edge_compatibility(pieces, grid, N, all_comparisons, ax):
+    """
+    Visualize edge compatibility scores on the grid
+    """
+    if not pieces:
+        return
+    
+    # Create a blank image for visualization
+    vis_img = np.ones((N*10, N*10, 3), dtype=np.uint8) * 255
+    
+    # Create compatibility lookup
+    compat_dict = {}
+    if all_comparisons:
+        for comp in all_comparisons:
+            key = (comp['piece1'], comp['piece2'], comp['edge1'], comp['edge2'])
+            compat_dict[key] = comp['score']
+    
+    # Draw grid lines and compatibility scores
+    for r in range(N):
+        for c in range(N):
+            piece_idx = grid[r][c]
+            if piece_idx is None:
+                continue
+            
+            # Draw cell
+            cv2.rectangle(vis_img, (c*10, r*10), ((c+1)*10, (r+1)*10), (200, 200, 200), 1)
+            
+            # Draw piece number
+            cv2.putText(vis_img, str(piece_idx+1), (c*10+3, r*10+8), 
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 0, 0), 1)
+            
+            # Check right edge compatibility
+            if c < N-1:
+                right_idx = grid[r][c+1]
+                if right_idx is not None:
+                    score = 0
+                    for comp in all_comparisons:
+                        if (comp['piece1'] == piece_idx and comp['piece2'] == right_idx and 
+                            comp['edge1'] == 'right' and comp['edge2'] == 'left'):
+                            score = comp['score']
+                            break
+                    
+                    # Draw edge with color based on score
+                    color = (0, int(255 * score), 0)  # Green intensity based on score
+                    cv2.line(vis_img, ((c+1)*10, r*10+5), ((c+1)*10, (r+1)*10-5), color, 2)
+            
+            # Check bottom edge compatibility
+            if r < N-1:
+                bottom_idx = grid[r+1][c]
+                if bottom_idx is not None:
+                    score = 0
+                    for comp in all_comparisons:
+                        if (comp['piece1'] == piece_idx and comp['piece2'] == bottom_idx and 
+                            comp['edge1'] == 'bottom' and comp['edge2'] == 'top'):
+                            score = comp['score']
+                            break
+                    
+                    # Draw edge with color based on score
+                    color = (0, int(255 * score), 0)  # Green intensity based on score
+                    cv2.line(vis_img, (c*10+5, (r+1)*10), ((c+1)*10-5, (r+1)*10), color, 2)
+    
+    ax.imshow(vis_img)
+    ax.axis('off')
+    
+    # Add colorbar legend
+    from matplotlib import cm
+    from matplotlib.patches import Rectangle
+    import matplotlib.pyplot as plt
+    
+    # Create a simple colorbar
+    sm = plt.cm.ScalarMappable(cmap=plt.cm.Greens, norm=plt.Normalize(vmin=0, vmax=1))
+    sm.set_array([])
+    plt.colorbar(sm, ax=ax, fraction=0.046, pad=0.04, label='Edge Compatibility')
+    
