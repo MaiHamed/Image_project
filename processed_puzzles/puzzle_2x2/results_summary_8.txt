@@ -4,14 +4,14 @@ PUZZLE ASSEMBLY RESULTS - Puzzle 8 (2x2)
 PAPER ALGORITHM - ORIENTATION ANALYSIS:
   • Selected orientation: Bottom→Top
   • Description: Rows swapped (bottom moved to top)
-  • Corner compatibility score: 0.643
-  • Grid compatibility score: 0.857
-  • Combined score: 0.793
+  • Corner compatibility score: 0.609
+  • Grid compatibility score: 0.813
+  • Combined score: 0.752
   • All orientations tested:
-    - Original: Corner=0.703, Grid=0.942, Combined=0.871
-    - Bottom→Top: Corner=0.681, Grid=0.910, Combined=0.841
-    - Left→Right: Corner=0.690, Grid=0.915, Combined=0.847
-    - Both: Corner=0.662, Grid=0.882, Combined=0.816
+    - Original: Corner=0.633, Grid=0.850, Combined=0.785
+    - Bottom→Top: Corner=0.633, Grid=0.846, Combined=0.782
+    - Left→Right: Corner=0.613, Grid=0.810, Combined=0.751
+    - Both: Corner=0.604, Grid=0.806, Combined=0.746
 
 3. FINAL ASSEMBLY:
    Grid (selected): [[1, 0], [3, 2]]

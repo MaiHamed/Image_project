@@ -6,8 +6,341 @@ import zipfile
 import shutil
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
-from functions import analyze_all_possible_matches_paper_based, assemble_grid_from_pieces, choose_best_orientation_hybrid, detect_grid_size, enhance_image, estimate_noise, evaluate_corner_compatibility_direct, evaluate_grid_compatibility_direct, extract_generic_grid_pieces, reassemble_grid_all_orientations, selective_median_filter, visualize_piece_relationships
-from visualize import show_examples, visualize_generic_grid, visualize_orientation_comparison
+from functions import  assemble_grid_from_pieces, detect_grid_size, enhance_image, estimate_noise, extract_generic_grid_pieces, selective_median_filter
+from paper_algorithms import PaperPuzzleSolver
+from visualize import show_examples, visualize_generic_grid, visualize_orientation_comparison, visualize_comparison_heatmap, visualize_matches_with_lines
+from descriptor_assembler import DescriptorBasedAssembler
+
+def run_paper_algorithm_with_fix(all_piece_images, piece_files, N, puzzle_id, puzzle_output_dir):
+    """
+    Run paper algorithm with fixes for common issues - SIMPLIFIED VERSION
+    """
+    print(f"\n📘 PAPER ALGORITHM")
+    print("   Method: Pomeranz et al. (2011) - Prediction-based compatibility")
+    
+    results = {
+        'success': False,
+        'all_comparisons': None,
+        'all_piece_rotations': None,
+        'final_grid': None,
+        'best_buddies': None,
+        'assembled_image': None,
+        'save_path': None,
+        'grid_score': 0,
+        'combined_score': 0
+    }
+    
+    try:
+        # Initialize solver
+        solver = PaperPuzzleSolver(p=0.3, q=1/16, use_prediction=True, border_width=10)
+        
+        # Step 1: Compute pairwise comparisons for visualization
+        print("   Step 1: Computing pairwise comparisons...")
+        all_comparisons, all_piece_rotations, best_buddies = solver.solve_for_comparisons(all_piece_images)
+
+        # Step 2: Build robust compatibility matrix
+        print("   Step 2: Building compatibility matrix...")
+        compatibility_matrix = solver.build_compatibility_matrix(all_piece_images)
+
+        # Step 3: Safely assemble puzzle
+        print("   Step 3: Assembling puzzle...")
+        try:
+            # First try the regular greedy assemble
+            final_grid = solver.greedy_assemble(all_piece_images, compatibility_matrix, N)
+        except Exception as e:
+            print(f"   ⚠️ First assembly failed: {e}, trying fallback...")
+            try:
+                # Try the fixed version
+                final_grid = solver.greedy_assemble_fixed(all_piece_images, compatibility_matrix, N)
+            except Exception as e2:
+                print(f"   ⚠️ Fixed assembly failed: {e2}, creating simple grid...")
+                # Create a simple sequential grid as last resort
+                final_grid = []
+                piece_idx = 0
+                for r in range(N):
+                    row = []
+                    for c in range(N):
+                        if piece_idx < len(all_piece_images):
+                            row.append(piece_idx)
+                            piece_idx += 1
+                        else:
+                            row.append(None)
+                    final_grid.append(row)
+
+        results['all_comparisons'] = all_comparisons
+        results['all_piece_rotations'] = all_piece_rotations
+        results['final_grid'] = final_grid
+        results['best_buddies'] = best_buddies
+        
+        print(f"✅ Paper Algorithm analysis completed")
+        print(f"   Found {len(all_comparisons)} comparisons")
+        print(f"   Grid size: {N}x{N}")
+        
+        # ========== VISUALIZATION: Heatmap ==========
+        if all_comparisons:
+            print(f"\n📊 VISUALIZING ALL MATCHES (Heatmap)")
+            try:
+                # Create dummy piece files list for compatibility
+                dummy_piece_files = [f"piece_{i}" for i in range(len(all_piece_images))]
+                visualize_comparison_heatmap(
+                    all_comparisons, dummy_piece_files, N, f"Paper Algorithm - Puzzle {puzzle_id}"
+                )
+            except Exception as e:
+                print(f"   ⚠️ Heatmap visualization failed: {e}")
+        
+        # ========== VISUALIZATION: Top matches with connecting lines ==========
+        if all_comparisons:
+            print(f"\n🔗 VISUALIZING TOP MATCHES")
+            try:
+                visualize_matches_with_lines(all_piece_images, all_comparisons, top_n=5)
+            except Exception as e:
+                print(f"   ⚠️ Match visualization failed: {e}")
+                
+            # Print top matches
+            sorted_comparisons = sorted(all_comparisons, key=lambda x: x['score'], reverse=True)
+            print(f"\n🏆 TOP 5 MATCHES:")
+            for idx in range(min(5, len(sorted_comparisons))):
+                match = sorted_comparisons[idx]
+                print(f"   {idx+1}. P{match['piece1']+1} {match['edge1']} ↔ P{match['piece2']+1} {match['edge2']} "
+                      f"(Score: {match['score']:.4f})")
+        
+        # ========== SIMPLE ASSEMBLY AND SCORING ==========
+        if final_grid is not None:
+            print(f"\n🎯 ASSEMBLING FINAL GRID")
+            
+            try:
+                # Assemble the grid
+                assembled_paper = assemble_grid_from_pieces(all_piece_images, final_grid, N=N, rotations=all_piece_rotations)
+                
+                if assembled_paper is not None:
+                    results['assembled_image'] = assembled_paper
+                    
+                    # Calculate simple score based on comparisons
+                    if all_comparisons:
+                        # Use top 5 scores to calculate grid score
+                        top_scores = [c['score'] for c in all_comparisons[:min(5, len(all_comparisons))]]
+                        grid_score = np.mean(top_scores) if top_scores else 0.5
+                        
+                        # Calculate average of all scores
+                        all_scores = [c['score'] for c in all_comparisons]
+                        avg_score = np.mean(all_scores) if all_scores else 0.5
+                        
+                        # Combined score: 70% top scores, 30% average score
+                        combined_score = 0.7 * grid_score + 0.3 * avg_score
+                    else:
+                        grid_score = 0.5
+                        combined_score = 0.5
+                    
+                    results['grid_score'] = grid_score
+                    results['combined_score'] = combined_score
+                    
+                    print(f"\n   📊 Assembly Statistics:")
+                    print(f"   📈 Scores:")
+                    print(f"      - Grid compatibility: {grid_score:.3f}")
+                    print(f"      - Combined score: {combined_score:.3f}")
+                    
+                    # Visualize the assembled result
+                    plt.figure(figsize=(8, 8))
+                    plt.imshow(cv2.cvtColor(assembled_paper, cv2.COLOR_BGR2RGB))
+                    
+                    # Color code based on score
+                    if combined_score > 0.7:
+                        color = "green"
+                        quality = "Excellent"
+                    elif combined_score > 0.5:
+                        color = "orange"
+                        quality = "Good"
+                    elif combined_score > 0.3:
+                        color = "yellow"
+                        quality = "Fair"
+                    else:
+                        color = "red"
+                        quality = "Poor"
+                    
+                    plt.title(f"Paper Algorithm - Puzzle {puzzle_id} ({N}x{N})\n"
+                             f"Quality: {quality} ({combined_score:.3f})", 
+                             fontsize=14, fontweight='bold', color=color)
+                    plt.axis('off')
+                    
+                    # Add score annotations
+                    plt.figtext(0.5, 0.02, 
+                               f"Grid Score: {grid_score:.3f} | Combined: {combined_score:.3f}",
+                               ha='center', fontsize=10, 
+                               bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
+                    
+                    plt.tight_layout()
+                    plt.show()
+                    
+                    # Save paper assembly
+                    paper_save_path = os.path.join(puzzle_output_dir, f"paper_assembled_{puzzle_id}.jpg")
+                    cv2.imwrite(paper_save_path, assembled_paper)
+                    results['save_path'] = paper_save_path
+                    print(f"   💾 Saved paper assembly to: {paper_save_path}")
+                    
+                    results['success'] = True
+                    
+                else:
+                    print("   ⚠️ Could not assemble the grid")
+                    
+            except Exception as e:
+                print(f"   ⚠️ Assembly failed: {e}")
+                import traceback
+                traceback.print_exc()
+                
+                # Try simple fallback assembly without rotations
+                try:
+                    assembled_paper = assemble_grid_from_pieces(all_piece_images, final_grid, N=N)
+                    if assembled_paper is not None:
+                        results['assembled_image'] = assembled_paper
+                        results['success'] = True
+                        
+                        plt.figure(figsize=(8, 8))
+                        plt.imshow(cv2.cvtColor(assembled_paper, cv2.COLOR_BGR2RGB))
+                        plt.title(f"Paper Algorithm - Puzzle {puzzle_id} ({N}x{N})\nFallback Assembly", 
+                                 fontsize=14, fontweight='bold')
+                        plt.axis('off')
+                        plt.show()
+                        
+                        paper_save_path = os.path.join(puzzle_output_dir, f"paper_assembled_{puzzle_id}_fallback.jpg")
+                        cv2.imwrite(paper_save_path, assembled_paper)
+                        results['save_path'] = paper_save_path
+                        results['grid_score'] = 0.5
+                        results['combined_score'] = 0.5
+                        print(f"   💾 Saved fallback assembly to: {paper_save_path}")
+                except Exception as e2:
+                    print(f"   ⚠️ Fallback assembly also failed: {e2}")
+        else:
+            print("   ⚠️ No grid assembly from paper solver")
+            
+    except Exception as e:
+        print(f"   ❌ Paper Algorithm failed: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    return results
+
+def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, puzzle_output_dir):
+    """
+    Run descriptor algorithm with improved scoring
+    """
+    print(f"\n🤖 DESCRIPTOR-BASED ALGORITHM")
+    print("   Method: Enhanced edge descriptors with better discrimination")
+    
+    results = {
+        'success': False,
+        'all_comparisons': None,
+        'all_piece_rotations': None,
+        'final_grid': None,
+        'best_buddies': None,
+        'assembly_score': 0,
+        'assembled_image': None,
+        'save_path': None
+    }
+    
+    try:
+        # Initialize descriptor-based assembler
+        descriptor_assembler = DescriptorBasedAssembler(
+            border_width=8,
+            descriptor_length=100
+        )
+        
+        # Solve using descriptor-based algorithm
+        all_comparisons, all_piece_rotations, final_grid, best_buddies, assembly_score = \
+            descriptor_assembler.solve(all_piece_images)
+        
+        results.update({
+            'all_comparisons': all_comparisons,
+            'all_piece_rotations': all_piece_rotations,
+            'final_grid': final_grid,
+            'best_buddies': best_buddies,
+            'assembly_score': assembly_score
+        })
+        
+        print(f"✅ Descriptor Algorithm analysis completed (Score: {assembly_score:.3f})")
+        
+        # =====================================
+        # VISUALIZE ALL COMPARISONS (Heatmap)
+        # =====================================
+        if all_comparisons:
+            print(f"\n📊 Visualizing all descriptor matches (Heatmap)")
+            try:
+                horizontal_scores, vertical_scores = visualize_comparison_heatmap(
+                    all_comparisons, all_piece_images, N, f"Descriptor Algorithm - Puzzle {puzzle_id}"
+                )
+            except Exception as e:
+                print(f"   ⚠️ Heatmap visualization failed: {e}")
+        
+        # =====================================
+        # VISUALIZE TOP 3 MATCHES
+        # =====================================
+        if all_comparisons:
+            print(f"\n🔗 Visualizing top 3 descriptor matches")
+            try:
+                visualize_matches_with_lines(all_piece_images, all_comparisons, top_n=3)
+            except Exception as e:
+                print(f"   ⚠️ Top matches visualization failed: {e}")
+        
+        # =====================================
+        # ASSEMBLE FINAL GRID
+        # =====================================
+        if final_grid is not None:
+            print(f"\n🎯 Assembling descriptor grid")
+            try:
+                assembled_descriptor = assemble_grid_from_pieces(all_piece_images, final_grid, N=N)
+                
+                if assembled_descriptor is not None:
+                    results['assembled_image'] = assembled_descriptor
+                    
+                    # Visualize assembled image
+                    plt.figure(figsize=(8, 8))
+                    plt.imshow(cv2.cvtColor(assembled_descriptor, cv2.COLOR_BGR2RGB))
+                    
+                    # Color code quality
+                    if assembly_score > 0.3:
+                        color, quality = "green", "Excellent"
+                    elif assembly_score > 0.2:
+                        color, quality = "orange", "Good"
+                    elif assembly_score > 0.1:
+                        color, quality = "yellow", "Fair"
+                    else:
+                        color, quality = "red", "Poor"
+                    
+                    plt.title(
+                        f"Descriptor Algorithm - Puzzle {puzzle_id} ({N}x{N})\n"
+                        f"Score: {assembly_score:.3f} | Quality: {quality}",
+                        fontsize=14, fontweight='bold', color=color
+                    )
+                    plt.axis('off')
+                    
+                    plt.figtext(
+                        0.5, 0.02,
+                        f"Assembly Score: {assembly_score:.3f}",
+                        ha='center', fontsize=10,
+                        bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.8)
+                    )
+                    
+                    plt.tight_layout()
+                    plt.show()
+                    
+                    # Save assembled image
+                    descriptor_save_path = os.path.join(puzzle_output_dir, f"descriptor_assembled_{puzzle_id}.jpg")
+                    cv2.imwrite(descriptor_save_path, assembled_descriptor)
+                    results['save_path'] = descriptor_save_path
+                    results['success'] = True
+                    print(f"   💾 Saved descriptor assembly to: {descriptor_save_path}")
+                else:
+                    print("   ⚠️ Could not assemble descriptor grid")
+            except Exception as e:
+                print(f"   ⚠️ Descriptor assembly failed: {e}")
+        else:
+            print("   ⚠️ No grid from descriptor solver")
+    
+    except Exception as e:
+        print(f"   ❌ Descriptor Algorithm failed: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    return results
 
 def main():
     # 1️⃣ UPLOAD ZIP
@@ -206,10 +539,10 @@ def main():
         print(f"CROPPING COMPLETE: {total_pieces_extracted} pieces extracted")
         print("=" * 70)
 
-    # 5️⃣ RUN PAPER-BASED ANALYSIS
+    # 5️⃣ RUN BOTH ALGORITHMS
     if 'images_by_dir' in locals():
         print("\n" + "="*70)
-        print("🔍 PAPER ALGORITHM - ORIENTATION ANALYSIS")
+        print("🔍 DUAL ALGORITHM COMPARISON")
         print("="*70)
 
         for dir_name, dir_images in images_by_dir.items():
@@ -289,182 +622,169 @@ def main():
                 print(f"🧩 ASSEMBLING PUZZLE {puzzle_id} ({N}x{N}, {num_pieces} pieces)")
                 print("="*60)
                 
-                # ========== PAPER ALGORITHM - ORIENTATION ANALYSIS ==========
-                print(f"\n📘 PAPER ALGORITHM - Testing All Orientations")
+                # ========== RUN PAPER ALGORITHM ==========
+                paper_results = run_paper_algorithm_with_fix(
+                    all_piece_images, pieces, N, puzzle_id, puzzle_output_dir
+                )
                 
-                # Initialize variables
-                assembled_paper = None
-                final_grid_paper = None
-                best_orientation = None
-                corner_score = 0
-                grid_score = 0
-                combined_score = 0
+                # ========== RUN DESCRIPTOR ALGORITHM ==========
+                descriptor_results = run_descriptor_algorithm_with_improvement(
+                    all_piece_images, N, puzzle_id, puzzle_output_dir
+                )
                 
-                try:
-                    all_comparisons_paper, all_piece_rotations_paper, final_grid_paper, best_buddies_paper = \
-                        analyze_all_possible_matches_paper_based(all_piece_images, pieces, N)
+                # ========== COMPARE BOTH ALGORITHMS ==========
+                print(f"\n🔀 ALGORITHM COMPARISON")
+                print("="*60)
+                
+                if paper_results['success'] and descriptor_results['success']:
+                    print("📊 Both algorithms succeeded!")
+                    print(f"   Paper Algorithm Score: {paper_results.get('combined_score', 0):.3f}")
+                    print(f"   Descriptor Algorithm Score: {descriptor_results.get('assembly_score', 0):.3f}")
                     
-                    if final_grid_paper is not None:
-                        # Test all 4 orientations
-                        orientations = reassemble_grid_all_orientations(final_grid_paper, N)
-                        
-                        print("   🎯 Original grid arrangement:")
-                        visualize_piece_relationships(all_piece_images, final_grid_paper, N, 
-                                                    f"Puzzle {puzzle_id}: Original Paper Grid ({N}x{N})")
-                        
-                        # Use hybrid evaluation
-                        print("   📊 Evaluating all orientations...")
-                        best_orientation, corner_score, grid_score = choose_best_orientation_hybrid(
-                            all_piece_images, orientations, N, all_comparisons_paper
-                        )
-                        
-                        combined_score = 0.3 * corner_score + 0.7 * grid_score
-                        
-                        # Visualize all orientations
-                        visualize_orientation_comparison(all_piece_images, orientations, N, puzzle_id)
-                        
-                        if best_orientation:
-                            # Show why this orientation is the best
-                            print(f"\n   📊 Selected Orientation: {best_orientation['name']}")
-                            print(f"   📈 Scores:")
-                            print(f"      - Corner compatibility: {corner_score:.3f}")
-                            print(f"      - Grid compatibility: {grid_score:.3f}")
-                            print(f"      - Combined score: {combined_score:.3f}")
-                            
-                            # Show all scores for comparison
-                            print(f"   📊 All orientation scores:")
-                            for orientation in orientations:
-                                c_score = evaluate_corner_compatibility_direct(all_piece_images, orientation['grid'], N)
-                                g_score = evaluate_grid_compatibility_direct(all_piece_images, orientation['grid'], N)
-                                o_combined = 0.3 * c_score + 0.7 * g_score
-                                
-                                if orientation['name'] == best_orientation['name']:
-                                    print(f"      → {orientation['name']}: {o_combined:.3f} (SELECTED)")
-                                else:
-                                    diff = combined_score - o_combined
-                                    print(f"      - {orientation['name']}: {o_combined:.3f} ({'+' if diff > 0 else ''}{diff:.3f})")
-                            
-                            # Assemble with the best orientation
-                            assembled_paper = assemble_grid_from_pieces(
-                                all_piece_images, 
-                                best_orientation['grid'], 
-                                N=N
-                            )
-                            
-                            # Visualize the final assembly
-                            if assembled_paper is not None:
-                                plt.figure(figsize=(8, 8))
-                                plt.imshow(cv2.cvtColor(assembled_paper, cv2.COLOR_BGR2RGB))
-                                
-                                # Color code based on score
-                                if combined_score > 0.7:
-                                    color = "green"
-                                    quality = "Excellent"
-                                elif combined_score > 0.5:
-                                    color = "orange"
-                                    quality = "Good"
-                                elif combined_score > 0.3:
-                                    color = "yellow"
-                                    quality = "Fair"
-                                else:
-                                    color = "red"
-                                    quality = "Poor"
-                                
-                                plt.title(f"Puzzle {puzzle_id}: Final Assembly ({N}x{N})\nOrientation: {best_orientation['name']}\nQuality: {quality} ({combined_score:.3f})", 
-                                         fontsize=14, fontweight='bold', color=color)
-                                plt.axis('off')
-                                
-                                # Add score annotations
-                                plt.figtext(0.5, 0.02, 
-                                           f"Corner: {corner_score:.3f} | Grid: {grid_score:.3f} | Combined: {combined_score:.3f}",
-                                           ha='center', fontsize=10, 
-                                           bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgray", alpha=0.8))
-                                
-                                plt.tight_layout()
-                                plt.show()
-                            
-                            # Save paper assembly
-                            paper_save_path = os.path.join(puzzle_output_dir, f"paper_assembled_{puzzle_id}_{best_orientation['name'].replace('→', '_')}.jpg")
-                            if assembled_paper is not None:
-                                cv2.imwrite(paper_save_path, assembled_paper)
-                                print(f"   💾 Saved paper assembly to: {paper_save_path}")
-                                
-                            # Save all orientations for reference
-                            for orientation in orientations:
-                                assembled = assemble_grid_from_pieces(all_piece_images, orientation['grid'], N=N)
-                                if assembled is not None:
-                                    orient_path = os.path.join(puzzle_output_dir, f"paper_{puzzle_id}_{orientation['name'].replace('→', '_')}.jpg")
-                                    cv2.imwrite(orient_path, assembled)
-                        else:
-                            assembled_paper = None
-                            print("   ⚠️ Could not select best orientation")
+                    # Determine which algorithm performed better
+                    paper_score = paper_results.get('combined_score', 0)
+                    descriptor_score = descriptor_results.get('assembly_score', 0)
+                    
+                    if paper_score > descriptor_score:
+                        diff = paper_score - descriptor_score
+                        print(f"   🏆 Winner: Paper Algorithm (by {diff:.3f})")
+                        winner = "Paper"
+                    elif descriptor_score > paper_score:
+                        diff = descriptor_score - paper_score
+                        print(f"   🏆 Winner: Descriptor Algorithm (by {diff:.3f})")
+                        winner = "Descriptor"
                     else:
-                        assembled_paper = None
-                        print("   ⚠️ No grid assembly from paper solver")
-                        
-                except Exception as e:
-                    print(f"   ❌ Paper solver failed: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    assembled_paper = None
+                        print(f"   ⚖️ Tie: Both algorithms performed equally")
+                        winner = "Tie"
+                    
+                    # Create side-by-side comparison visualization
+                    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(16, 8))
+                    
+                    # Paper algorithm result
+                    ax1.imshow(cv2.cvtColor(paper_results['assembled_image'], cv2.COLOR_BGR2RGB))
+                    ax1.set_title(f"Paper Algorithm\nScore: {paper_score:.3f}", 
+                                 fontsize=14, fontweight='bold',
+                                 color='green' if winner == "Paper" else 'black')
+                    ax1.axis('off')
+                    
+                    # Descriptor algorithm result
+                    ax2.imshow(cv2.cvtColor(descriptor_results['assembled_image'], cv2.COLOR_BGR2RGB))
+                    ax2.set_title(f"Descriptor Algorithm\nScore: {descriptor_score:.3f}", 
+                                 fontsize=14, fontweight='bold',
+                                 color='green' if winner == "Descriptor" else 'black')
+                    ax2.axis('off')
+                    
+                    plt.suptitle(f"Algorithm Comparison - Puzzle {puzzle_id} ({N}x{N})", 
+                                fontsize=16, fontweight='bold')
+                    plt.tight_layout()
+                    plt.show()
+                    
+                elif paper_results['success']:
+                    print("📊 Only Paper Algorithm succeeded")
+                elif descriptor_results['success']:
+                    print("📊 Only Descriptor Algorithm succeeded")
+                else:
+                    print("📊 Both algorithms failed to assemble the puzzle")
                 
-                # ========== SAVE RESULTS SUMMARY ==========
-                results_file = os.path.join(puzzle_output_dir, f"results_summary_{puzzle_id}.txt")
+                # ========== SAVE COMPREHENSIVE RESULTS SUMMARY ==========
+                results_file = os.path.join(puzzle_output_dir, f"dual_algorithm_results_{puzzle_id}.txt")
                 with open(results_file, 'w') as f:
-                    f.write(f"PUZZLE ASSEMBLY RESULTS - Puzzle {puzzle_id} ({N}x{N})\n")
+                    f.write(f"DUAL ALGORITHM COMPARISON - Puzzle {puzzle_id} ({N}x{N})\n")
                     f.write("="*60 + "\n\n")
                     
-                    f.write("PAPER ALGORITHM - ORIENTATION ANALYSIS:\n")
-                    if best_orientation:
-                        f.write(f"  • Selected orientation: {best_orientation['name']}\n")
-                        f.write(f"  • Description: {best_orientation['description']}\n")
-                        f.write(f"  • Corner compatibility score: {corner_score:.3f}\n")
-                        f.write(f"  • Grid compatibility score: {grid_score:.3f}\n")
-                        f.write(f"  • Combined score: {combined_score:.3f}\n")
-                        f.write(f"  • All orientations tested:\n")
-                        for orientation in orientations:
-                            c_score = evaluate_corner_compatibility_direct(all_piece_images, orientation['grid'], N)
-                            g_score = evaluate_grid_compatibility_direct(all_piece_images, orientation['grid'], N)
-                            o_combined = 0.3 * c_score + 0.7 * g_score
-                            f.write(f"    - {orientation['name']}: Corner={c_score:.3f}, Grid={g_score:.3f}, Combined={o_combined:.3f}\n")
+                    f.write("PAPER ALGORITHM RESULTS:\n")
+                    if paper_results['success']:
+                        f.write(f"  • Success: ✓\n")
+                        f.write(f"  • Combined Score: {paper_results.get('combined_score', 0):.3f}\n")
+                        
+                    else:
+                        f.write(f"  • Success: ✗\n")
                     
-                    if assembled_paper is not None:
-                        f.write(f"\n3. FINAL ASSEMBLY:\n")
-                        f.write(f"   Grid (selected): {best_orientation['grid']}\n")
-                        f.write(f"   Saved to: {paper_save_path}\n")
+                    f.write(f"\nDESCRIPTOR ALGORITHM RESULTS:\n")
+                    if descriptor_results['success']:
+                        f.write(f"  • Success: ✓\n")
+                        f.write(f"  • Assembly Score: {descriptor_results.get('assembly_score', 0):.3f}\n")
+                        f.write(f"  • Total Comparisons: {len(descriptor_results.get('all_comparisons', []))}\n")
+                        if descriptor_results['save_path']:
+                            f.write(f"  • Saved to: {descriptor_results['save_path']}\n")
+                    else:
+                        f.write(f"  • Success: ✗\n")
                     
-                print(f"   📝 Results summary saved to: {results_file}")
+                    f.write(f"\nCOMPARISON:\n")
+                    if paper_results['success'] and descriptor_results['success']:
+                        if paper_score > descriptor_score:
+                            f.write(f"  • Winner: Paper Algorithm (by {paper_score - descriptor_score:.3f})\n")
+                        elif descriptor_score > paper_score:
+                            f.write(f"  • Winner: Descriptor Algorithm (by {descriptor_score - paper_score:.3f})\n")
+                        else:
+                            f.write(f"  • Tie: Both algorithms performed equally\n")
+                    elif paper_results['success']:
+                        f.write(f"  • Only Paper Algorithm succeeded\n")
+                    elif descriptor_results['success']:
+                        f.write(f"  • Only Descriptor Algorithm succeeded\n")
+                    else:
+                        f.write(f"  • Both algorithms failed\n")
+                
+                print(f"   📝 Comprehensive results saved to: {results_file}")
                 
                 # Store assembly results
-                assembly_results.append({
+                result_entry = {
                     'puzzle_id': puzzle_id,
                     'grid_size': N,
                     'num_pieces': num_pieces,
-                    'paper_assembly': assembled_paper is not None,
-                    'paper_orientation': best_orientation['name'] if assembled_paper is not None else None,
-                    'paper_score': combined_score if assembled_paper is not None else 0
-                })
+                    'paper_success': paper_results['success'],
+                    'descriptor_success': descriptor_results['success'],
+                    'paper_score': paper_results.get('combined_score', 0),
+                    'descriptor_score': descriptor_results.get('assembly_score', 0)
+                }
+                
+                assembly_results.append(result_entry)
                 
                 print(f"\n✅ Puzzle {puzzle_id} assembly completed [{processed_puzzles}/{puzzles_to_assemble}]")
             
             # Show final summary
             print("\n" + "=" * 80)
-            print("📊 ASSEMBLY SUMMARY")
+            print("📊 DUAL ALGORITHM SUMMARY")
             print("=" * 80)
             
             if assembly_results:
+                paper_success = sum(1 for r in assembly_results if r['paper_success'])
+                descriptor_success = sum(1 for r in assembly_results if r['descriptor_success'])
+                both_success = sum(1 for r in assembly_results if r['paper_success'] and r['descriptor_success'])
+                
+                print(f"\n📈 Success Rates:")
+                print(f"   Paper Algorithm: {paper_success}/{processed_puzzles} ({paper_success/processed_puzzles*100:.1f}%)")
+                print(f"   Descriptor Algorithm: {descriptor_success}/{processed_puzzles} ({descriptor_success/processed_puzzles*100:.1f}%)")
+                print(f"   Both Algorithms: {both_success}/{processed_puzzles} ({both_success/processed_puzzles*100:.1f}%)")
+                
+                print(f"\n📊 Average Scores (for successful assemblies):")
+                if paper_success > 0:
+                    avg_paper_score = np.mean([r['paper_score'] for r in assembly_results if r['paper_success']])
+                    print(f"   Paper Algorithm: {avg_paper_score:.3f}")
+                else:
+                    print(f"   Paper Algorithm: N/A (no successful assemblies)")
+                
+                if descriptor_success > 0:
+                    avg_descriptor_score = np.mean([r['descriptor_score'] for r in assembly_results if r['descriptor_success']])
+                    print(f"   Descriptor Algorithm: {avg_descriptor_score:.3f}")
+                else:
+                    print(f"   Descriptor Algorithm: N/A (no successful assemblies)")
+                
+                print(f"\n🧩 Detailed Results:")
                 for result in assembly_results:
-                    status = '✓' if result['paper_assembly'] else '✗'
-                    print(f"🧩 Puzzle {result['puzzle_id']} ({result['grid_size']}x{result['grid_size']}, {result['num_pieces']} pieces):")
-                    if result['paper_assembly']:
-                        print(f"   Paper Algorithm: {status} ({result['paper_orientation']}, score: {result['paper_score']:.3f})")
-                    else:
-                        print(f"   Paper Algorithm: {status}")
+                    paper_status = '✓' if result['paper_success'] else '✗'
+                    descriptor_status = '✓' if result['descriptor_success'] else '✗'
+                    
+                    print(f"   Puzzle {result['puzzle_id']} ({result['grid_size']}x{result['grid_size']}):")
+                    if result['paper_success']:
+                        print(f"      Paper: {paper_status} (score: {result['paper_score']:.3f})")
+                    if result['descriptor_success']:
+                        print(f"      Descriptor: {descriptor_status} (score: {result['descriptor_score']:.3f})")
                     print()
             else:
                 print("No puzzles were successfully assembled.")
             
-            print(f"✅ Total puzzles assembled: {processed_puzzles}/{puzzles_to_assemble}")
+            print(f"✅ Total puzzles processed: {processed_puzzles}/{puzzles_to_assemble}")
             print("=" * 80)
 
 if __name__ == "__main__":

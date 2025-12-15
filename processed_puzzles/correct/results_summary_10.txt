@@ -1,0 +1,4 @@
+PUZZLE ASSEMBLY RESULTS - Puzzle 10 (2x2)
+============================================================
+
+PAPER ALGORITHM - ORIENTATION ANALYSIS:

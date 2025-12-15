@@ -1,0 +1,18 @@
+PUZZLE ASSEMBLY RESULTS - Puzzle 16 (2x2)
+============================================================
+
+PAPER ALGORITHM - ORIENTATION ANALYSIS:
+  • Selected orientation: Bottom→Top
+  • Description: Rows swapped (bottom moved to top)
+  • Corner compatibility score: 0.556
+  • Grid compatibility score: 0.743
+  • Combined score: 0.687
+  • All orientations tested:
+    - Original: Corner=0.567, Grid=0.772, Combined=0.710
+    - Bottom→Top: Corner=0.600, Grid=0.791, Combined=0.733
+    - Left→Right: Corner=0.610, Grid=0.781, Combined=0.730
+    - Both: Corner=0.582, Grid=0.800, Combined=0.735
+
+3. FINAL ASSEMBLY:
+   Grid (selected): [[3, 0], [2, 1]]
+   Saved to: /Users/maiab/Desktop/Image project/processed_puzzles/puzzle_2x2/paper_assembled_16_Bottom_Top.jpg

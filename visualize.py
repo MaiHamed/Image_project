@@ -2,7 +2,7 @@ import matplotlib.pyplot as plt
 import cv2
 import numpy as np  
 import os
-from functions import assemble_grid_from_pieces, evaluate_corner_compatibility, evaluate_corner_compatibility_descriptor, evaluate_grid_compatibility
+from functions import assemble_grid_from_pieces
 
 #-------- GENERAL VISUALIZATION FUNCTIONS --------#
 def show_examples(examples, images_by_dir, output_dir):
@@ -229,41 +229,6 @@ def visualize_best_match_pair(piece1_img, piece2_img, desc1, desc2, score, info)
     plt.tight_layout()
     plt.show()
 
-def visualize_paper_solution(grid, piece_images, N, title="Paper Solver Solution"):
-    """
-    Visualize the solution from paper's algorithm
-    """
-    piece_height, piece_width = piece_images[0].shape[:2]
-    assembled_height = N * piece_height
-    assembled_width = N * piece_width
-    assembled = np.zeros((assembled_height, assembled_width, 3), dtype=np.uint8)
-    
-    for r in range(N):
-        for c in range(N):
-            piece_idx = grid[r][c]
-            if piece_idx is not None:
-                y_start = r * piece_height
-                x_start = c * piece_width
-                assembled[y_start:y_start+piece_height, 
-                         x_start:x_start+piece_width] = piece_images[piece_idx]
-    
-    # Draw grid lines
-    display_img = assembled.copy()
-    for i in range(1, N):
-        x = i * piece_width
-        cv2.line(display_img, (x, 0), (x, assembled_height), (0, 255, 0), 2)
-        y = i * piece_height
-        cv2.line(display_img, (0, y), (assembled_width, y), (0, 255, 0), 2)
-    
-    plt.figure(figsize=(8, 8))
-    plt.imshow(cv2.cvtColor(display_img, cv2.COLOR_BGR2RGB))
-    plt.title(title, fontsize=14, fontweight='bold')
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
-    
-    return assembled
-
 def visualize_matches_with_lines(piece_images, all_comparisons, top_n=10):
     """
     Visualize best matches by drawing connecting lines between pieces.
@@ -334,6 +299,39 @@ def visualize_matches_with_lines(piece_images, all_comparisons, top_n=10):
         print("-" * 60)
 
 #-------- PHASE 2: ASSEMBLY VISUALIZATION --------#
+# comment this we do not use this right now
+def visualize_paper_solution(grid, piece_images, N, title="Paper Solver Solution"):
+    """
+    Visualize the paper solver solution grid
+    """
+    if grid is None or piece_images is None:
+        print("   ⚠️ Cannot visualize: grid or piece_images is None")
+        return
+    
+    fig, axes = plt.subplots(N, N, figsize=(8, 8))
+    if N == 1:
+        axes = np.array([[axes]])
+    
+    for r in range(N):
+        for c in range(N):
+            piece_idx = grid[r][c]
+            ax = axes[r, c]
+            
+            if piece_idx is not None and piece_idx < len(piece_images):
+                img = piece_images[piece_idx]
+                ax.imshow(cv2.cvtColor(img, cv2.COLOR_BGR2RGB))
+                ax.set_title(f"P{piece_idx+1}", fontsize=10)
+            else:
+                ax.imshow(np.zeros((100, 100, 3), dtype=np.uint8))
+                ax.set_title("Empty", fontsize=10)
+            
+            ax.axis('off')
+    
+    plt.suptitle(title, fontsize=16, fontweight='bold')
+    plt.tight_layout()
+    plt.show()
+
+#comment this not used right now
 def visualize_orientation_comparison(pieces, orientations, N, puzzle_id):
     """
     Simple visualization of all orientations
@@ -356,7 +354,7 @@ def visualize_orientation_comparison(pieces, orientations, N, puzzle_id):
     plt.suptitle(f"Puzzle {puzzle_id}: All Orientations ({N}x{N})", fontsize=14, fontweight='bold')
     plt.tight_layout()
     plt.show()
-
+#same for this we do not use it
 def visualize_edge_compatibility(pieces, grid, N, all_comparisons, ax):
     """
     Visualize edge compatibility scores on the grid

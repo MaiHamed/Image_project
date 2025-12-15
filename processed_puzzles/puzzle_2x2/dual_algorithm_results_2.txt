@@ -1,0 +1,14 @@
+DUAL ALGORITHM COMPARISON - Puzzle 2 (2x2)
+============================================================
+
+PAPER ALGORITHM RESULTS:
+  • Success: ✗
+
+DESCRIPTOR ALGORITHM RESULTS:
+  • Success: ✓
+  • Assembly Score: 0.326
+  • Total Comparisons: 48
+  • Saved to: /Users/maiab/Desktop/Image project/processed_puzzles/puzzle_2x2/descriptor_assembled_2.jpg
+
+COMPARISON:
+  • Only Descriptor Algorithm succeeded

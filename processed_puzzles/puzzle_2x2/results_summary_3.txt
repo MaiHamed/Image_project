@@ -2,17 +2,5 @@ PUZZLE ASSEMBLY RESULTS - Puzzle 3 (2x2)
 ============================================================
 
 PAPER ALGORITHM - ORIENTATION ANALYSIS:
-  • Selected orientation: Original
-  • Description: No change
-  • Corner compatibility score: 0.520
-  • Grid compatibility score: 0.669
-  • Combined score: 0.624
-  • All orientations tested:
-    - Original: Corner=0.587, Grid=0.769, Combined=0.714
-    - Bottom→Top: Corner=0.562, Grid=0.773, Combined=0.710
-    - Left→Right: Corner=0.555, Grid=0.754, Combined=0.694
-    - Both: Corner=0.586, Grid=0.758, Combined=0.706
 
-3. FINAL ASSEMBLY:
-   Grid (selected): [[1, 3], [2, 0]]
-   Saved to: /Users/maiab/Desktop/Image project/processed_puzzles/puzzle_2x2/paper_assembled_3_Original.jpg
+3. FINAL ASSEMBLIES:
