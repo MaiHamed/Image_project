@@ -244,25 +244,39 @@ class DescriptorBasedAssembler:
                         continue
 
                     score = 0
-                    # Check left neighbor
+                    matches_used = 0
+
+                    # LEFT neighbor
                     if c > 0:
                         left_piece = grid[r][c-1]
                         for match in top_horizontal:
                             if match['piece1'] == left_piece and match['piece2'] == piece:
                                 score += match['score']
+                                matches_used += 1
                                 break
 
-                    # Check top neighbor
+                    # TOP neighbor
                     if r > 0:
                         top_piece = grid[r-1][c]
                         for match in top_vertical:
                             if match['piece1'] == top_piece and match['piece2'] == piece:
                                 score += match['score']
+                                matches_used += 1
                                 break
+
+                    # 🔒 ENFORCE 2-EDGE CONSISTENCY
+                    required_matches = (1 if c > 0 else 0) + (1 if r > 0 else 0)
+                    if matches_used < required_matches:
+                        continue
+
+                    # Optional: reward consistency
+                    if matches_used == 2:
+                        score *= 1.2
 
                     if score > best_score:
                         best_score = score
                         best_piece = piece
+
 
                 # Place the best scoring piece
                 grid[r][c] = best_piece
@@ -274,7 +288,8 @@ class DescriptorBasedAssembler:
  # you are not the issue
     def try_different_starting_pieces(self, top_horizontal, top_vertical, all_comparisons, N, num_pieces):
         """
-        Try different starting pieces to find best grid with both neighbor checks
+        Try different starting pieces to find best grid with both neighbor checks.
+        Enforces multi-edge consistency, but falls back if no piece satisfies all neighbors.
         """
         best_grid = None
         best_score = 0
@@ -293,35 +308,62 @@ class DescriptorBasedAssembler:
                         continue  # Already placed
                     best_piece = None
                     best_score_local = -1
+                    fallback_piece = None
+                    fallback_score = -1
 
                     for piece in range(num_pieces):
                         if piece in used:
                             continue
 
                         score = 0
-                        # Check left neighbor
+                        matches_used = 0
+
+                        # LEFT neighbor
                         if c > 0:
                             left_piece = grid[r][c-1]
                             for match in top_horizontal:
                                 if match['piece1'] == left_piece and match['piece2'] == piece:
                                     score += match['score']
+                                    matches_used += 1
                                     break
 
-                        # Check top neighbor
+                        # TOP neighbor
                         if r > 0:
                             top_piece = grid[r-1][c]
                             for match in top_vertical:
                                 if match['piece1'] == top_piece and match['piece2'] == piece:
                                     score += match['score']
+                                    matches_used += 1
                                     break
+
+                        required_matches = (1 if c > 0 else 0) + (1 if r > 0 else 0)
+
+                        # Keep track of highest-scoring piece even if it doesn't satisfy all neighbors
+                        if score > fallback_score:
+                            fallback_score = score
+                            fallback_piece = piece
+
+                        # Enforce 2-edge consistency only if possible
+                        if matches_used < required_matches:
+                            continue
+
+                        # Optional: reward double-edge agreement
+                        if matches_used == 2:
+                            score *= 1.2
 
                         if score > best_score_local:
                             best_score_local = score
                             best_piece = piece
 
-                    # Place the best scoring piece
+                    # Safety fallback if no piece satisfied both edges
+                    if best_piece is None:
+                        best_piece = fallback_piece
+                        best_score_local = fallback_score
+
+                    # Place the best piece
                     grid[r][c] = best_piece
                     used.add(best_piece)
+                    # print(f"Placed P{best_piece+1} at ({r},{c}) with score {best_score_local:.3f}")
 
             # Evaluate this grid
             score = self.evaluate_grid_quality(grid, all_comparisons, N)

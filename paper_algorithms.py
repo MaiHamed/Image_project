@@ -143,7 +143,6 @@ class PaperPuzzleSolver:
         relations = ['right', 'left', 'top', 'bottom']
         
         # Compute all raw dissimilarities
-        print("   Computing raw dissimilarities...")
         for i in range(num_pieces):
             for j in range(num_pieces):
                 if i == j:
@@ -154,7 +153,6 @@ class PaperPuzzleSolver:
                     )
         
         # Normalize: convert to compatibility scores (0-1, higher = better)
-        print("   Normalizing scores...")
         for rel_idx in range(4):
             # Get all non-zero values for this relation
             all_values = matrix[:, :, rel_idx][matrix[:, :, rel_idx] > 0]
@@ -170,128 +168,255 @@ class PaperPuzzleSolver:
                             if i != j and matrix[i, j, rel_idx] > 0:
                                 # Normalize and invert
                                 normalized = 1.0 - ((matrix[i, j, rel_idx] - min_val) / range_val)
-                                # Apply exponential to emphasize good matches
-                                matrix[i, j, rel_idx] = np.exp(2 * (normalized - 1))
+                                # Apply sigmoid to emphasize good matches
+                                matrix[i, j, rel_idx] = 1.0 / (1.0 + np.exp(-10 * (normalized - 0.5)))
         
         return matrix
     
-    # ========== ASSEMBLY METHODS ==========
+    # ========== IMPROVED ASSEMBLY METHODS ==========
+    
     def greedy_assemble(self, all_pieces, compatibility_matrix, N):
         """
-        Simple greedy assembly that's guaranteed to work
+        Robust greedy assembly that actually assembles the puzzle correctly
         """
         num_pieces = len(all_pieces)
         grid = [[None for _ in range(N)] for _ in range(N)]
         used = set()
         
-        # Simply fill the grid in order
-        piece_idx = 0
+        # Find the absolute strongest match to start
+        best_score = -1
+        best_pair = None
+        best_relation = None
+        
+        for i in range(num_pieces):
+            for j in range(num_pieces):
+                if i == j:
+                    continue
+                for rel_idx in range(4):  # 0:right, 1:left, 2:top, 3:bottom
+                    score = compatibility_matrix[i, j, rel_idx]
+                    if score > best_score:
+                        best_score = score
+                        best_pair = (i, j)
+                        best_relation = rel_idx
+        
+        # Start with the strongest match
+        if best_pair is not None:
+            i, j = best_pair
+            # Place first piece at top-left
+            grid[0][0] = i
+            used.add(i)
+            
+            # Place second piece based on relation
+            relations = ['right', 'left', 'top', 'bottom']
+            rel = relations[best_relation]
+            
+            if rel == 'right':
+                if N > 1:
+                    grid[0][1] = j
+                else:
+                    # If N=1, just place it somewhere
+                    for r in range(N):
+                        for c in range(N):
+                            if grid[r][c] is None:
+                                grid[r][c] = j
+                                break
+                        if j in used:
+                            break
+            elif rel == 'left':
+                # Can't place left of (0,0), so place at (0,1) and swap
+                if N > 1:
+                    grid[0][1] = j
+                    # Swap so they're in correct relation
+                    grid[0][0], grid[0][1] = grid[0][1], grid[0][0]
+                else:
+                    grid[0][0] = j  # Overwrite
+            elif rel == 'top':
+                # Can't place top of (0,0), so place at (1,0) and swap
+                if N > 1:
+                    grid[1][0] = j
+                    grid[0][0], grid[1][0] = grid[1][0], grid[0][0]
+                else:
+                    grid[0][0] = j
+            elif rel == 'bottom':
+                if N > 1:
+                    grid[1][0] = j
+                else:
+                    grid[0][0] = j
+            used.add(j)
+        else:
+            # Fallback: start with first piece
+            grid[0][0] = 0
+            used.add(0)
+        
+        print(f"   Started with pieces {best_pair[0] if best_pair else 0} and {best_pair[1] if best_pair else 'none'}")
+        
+        # Now fill the rest of the grid systematically
+        # We'll fill row by row, left to right
+        relations = ['right', 'left', 'top', 'bottom']
+        
         for r in range(N):
             for c in range(N):
-                if piece_idx < num_pieces:
-                    grid[r][c] = piece_idx
-                    used.add(piece_idx)
-                    piece_idx += 1
+                if grid[r][c] is not None:
+                    continue
+                
+                # Find the best piece for this position based on neighbors
+                best_piece = None
+                best_score = -1
+                
+                # Consider compatibility with left neighbor
+                left_score = -1
+                left_piece = None
+                if c > 0 and grid[r][c-1] is not None:
+                    left_neighbor = grid[r][c-1]
+                    for piece in range(num_pieces):
+                        if piece in used:
+                            continue
+                        score = compatibility_matrix[left_neighbor, piece, 0]  # right compatibility
+                        if score > left_score:
+                            left_score = score
+                            left_piece = piece
+                
+                # Consider compatibility with top neighbor
+                top_score = -1
+                top_piece = None
+                if r > 0 and grid[r-1][c] is not None:
+                    top_neighbor = grid[r-1][c]
+                    for piece in range(num_pieces):
+                        if piece in used:
+                            continue
+                        score = compatibility_matrix[top_neighbor, piece, 3]  # bottom compatibility
+                        if score > top_score:
+                            top_score = score
+                            top_piece = piece
+                
+                # Choose the best piece based on combined scores
+                candidates = {}
+                if left_piece is not None:
+                    candidates[left_piece] = left_score
+                if top_piece is not None:
+                    if top_piece in candidates:
+                        candidates[top_piece] = max(candidates[top_piece], top_score)
+                    else:
+                        candidates[top_piece] = top_score
+                
+                # Also consider pieces that might fit well based on diagonal neighbors
+                if not candidates and r > 0 and c > 0:
+                    # Check diagonal influence
+                    for piece in range(num_pieces):
+                        if piece in used:
+                            continue
+                        # Check left neighbor
+                        if grid[r][c-1] is not None:
+                            left_score = compatibility_matrix[grid[r][c-1], piece, 0]
+                        else:
+                            left_score = 0
+                        # Check top neighbor
+                        if grid[r-1][c] is not None:
+                            top_score = compatibility_matrix[grid[r-1][c], piece, 3]
+                        else:
+                            top_score = 0
+                        
+                        total_score = left_score + top_score
+                        candidates[piece] = total_score
+                
+                if candidates:
+                    # Find the best candidate
+                    best_piece = max(candidates.items(), key=lambda x: x[1])[0]
+                    grid[r][c] = best_piece
+                    used.add(best_piece)
+                else:
+                    # No good candidates based on neighbors, use any unused piece
+                    for piece in range(num_pieces):
+                        if piece not in used:
+                            grid[r][c] = piece
+                            used.add(piece)
+                            break
+        
+        # If we still have missing pieces (shouldn't happen), fill them
+        for r in range(N):
+            for c in range(N):
+                if grid[r][c] is None:
+                    for piece in range(num_pieces):
+                        if piece not in used:
+                            grid[r][c] = piece
+                            used.add(piece)
+                            break
         
         return grid
     
     def greedy_assemble_fixed(self, all_pieces, compatibility_matrix, N):
         """
-        Improved greedy assembly for PaperPuzzleSolver with bounds checking
+        Alternative greedy assembly with row-by-row placement
         """
         num_pieces = len(all_pieces)
         grid = [[None for _ in range(N)] for _ in range(N)]
         used = set()
-
-        # Start with strongest best-buddy pair
-        best_score = -1
-        best_pair = None
-        relations = ['right', 'left', 'top', 'bottom']
-        for i in range(num_pieces):
-            for j in range(num_pieces):
-                if i == j: continue
-                for rel_idx, rel in enumerate(relations):
-                    score = compatibility_matrix[i, j, rel_idx]
-                    if score > best_score:
-                        best_score = score
-                        best_pair = (i, j, rel)
-
-        # Place initial pair safely in the grid
-        center_r, center_c = N // 2, N // 2
         
-        # Check if we can place the pair safely
-        dr, dc = {'right': (0,1), 'left':(0,-1), 'top':(-1,0), 'bottom':(1,0)}[best_pair[2]]
+        # Start with piece 0 at (0,0)
+        grid[0][0] = 0
+        used.add(0)
         
-        # Calculate positions for both pieces
-        pos1_r, pos1_c = center_r, center_c
-        pos2_r, pos2_c = center_r + dr, center_c + dc
-        
-        # Adjust positions if out of bounds
-        if pos2_r < 0:
-            pos1_r, pos2_r = 1, 0
-        elif pos2_r >= N:
-            pos1_r, pos2_r = N-2, N-1
-        elif pos2_c < 0:
-            pos1_c, pos2_c = 1, 0
-        elif pos2_c >= N:
-            pos1_c, pos2_c = N-2, N-1
-        
-        # Place the pieces
-        grid[pos1_r][pos1_c] = best_pair[0]
-        grid[pos2_r][pos2_c] = best_pair[1]
-        used.update([best_pair[0], best_pair[1]])
-
-        # Continue placing pieces greedily
-        while len(used) < num_pieces:
-            best_score = -1
-            best_position = None
+        # Fill first row
+        for c in range(1, N):
             best_piece = None
-
-            for r in range(N):
-                for c in range(N):
-                    if grid[r][c] is not None:
-                        continue
-
-                    neighbors = []
-                    for rel, (dr, dc) in {'right':(0,-1), 'left':(0,1), 'top':(-1,0), 'bottom':(1,0)}.items():
-                        nr, nc = r+dr, c+dc
-                        if 0 <= nr < N and 0 <= nc < N and grid[nr][nc] is not None:
-                            neighbor_idx = grid[nr][nc]
-                            rel_idx = relations.index(rel)
-                            neighbors.append((neighbor_idx, rel_idx))
-
-                    if neighbors:
-                        for piece_idx in range(num_pieces):
-                            if piece_idx in used:
-                                continue
-                            score = np.mean([compatibility_matrix[neighbor, piece_idx, rel_idx] 
-                                        for neighbor, rel_idx in neighbors])
-                            if score > best_score:
-                                best_score = score
-                                best_position = (r, c)
-                                best_piece = piece_idx
-
+            best_score = -1
+            left_piece = grid[0][c-1]
+            
+            for piece in range(num_pieces):
+                if piece in used:
+                    continue
+                score = compatibility_matrix[left_piece, piece, 0]  # right compatibility
+                if score > best_score:
+                    best_score = score
+                    best_piece = piece
+            
             if best_piece is not None:
-                r, c = best_position
-                grid[r][c] = best_piece
+                grid[0][c] = best_piece
                 used.add(best_piece)
             else:
-                # fallback: place any remaining piece in first available spot
-                for r in range(N):
-                    for c in range(N):
-                        if grid[r][c] is None:
-                            for piece_idx in range(num_pieces):
-                                if piece_idx not in used:
-                                    grid[r][c] = piece_idx
-                                    used.add(piece_idx)
-                                    break
-                            if len(used) == num_pieces:
-                                break
-                    if len(used) == num_pieces:
+                # Use any unused piece
+                for piece in range(num_pieces):
+                    if piece not in used:
+                        grid[0][c] = piece
+                        used.add(piece)
                         break
-
+        
+        # Fill remaining rows
+        for r in range(1, N):
+            for c in range(N):
+                best_piece = None
+                best_score = -1
+                
+                # Check top neighbor
+                top_piece = grid[r-1][c]
+                for piece in range(num_pieces):
+                    if piece in used:
+                        continue
+                    score = compatibility_matrix[top_piece, piece, 3]  # bottom compatibility
+                    
+                    # Also consider left neighbor if exists
+                    if c > 0:
+                        left_piece = grid[r][c-1]
+                        left_score = compatibility_matrix[left_piece, piece, 0]  # right compatibility
+                        score = (score + left_score) / 2.0
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_piece = piece
+                
+                if best_piece is not None:
+                    grid[r][c] = best_piece
+                    used.add(best_piece)
+                else:
+                    # Use any unused piece
+                    for piece in range(num_pieces):
+                        if piece not in used:
+                            grid[r][c] = piece
+                            used.add(piece)
+                            break
+        
         return grid
-
+    
     # ========== ANALYSIS METHODS ==========
     
     def find_best_buddies(self, compatibility_matrix):
@@ -332,8 +457,9 @@ class PaperPuzzleSolver:
                         best_buddies.append({
                             'piece1': i,
                             'piece2': j,
-                            'relation': rel,
-                            'score': (score_ij + score_ji) / 2
+                            'edge1': rel,
+                            'edge2': relations[opp_idx],
+                            'score': (score_ij + score_ji) / 2.0
                         })
         
         return best_buddies
@@ -378,20 +504,13 @@ class PaperPuzzleSolver:
         num_pieces = len(all_pieces)
         N = int(np.sqrt(num_pieces))
         
-        print(f"🧩 Solving {N}x{N} puzzle with {num_pieces} pieces")
-        print(f"📊 Using {'prediction-based' if self.use_prediction else 'Lp norm'} compatibility")
-        
         # Step 1: Build compatibility matrix
-        print("1️⃣ Building compatibility matrix...")
         compatibility_matrix = self.build_compatibility_matrix(all_pieces)
         
         # Step 2: Find best buddies
-        print("2️⃣ Finding best matches...")
         best_buddies = self.find_best_buddies(compatibility_matrix)
-        print(f"   Found {len(best_buddies)} reciprocal best matches")
         
         # Step 3: Greedy assembly
-        print("3️⃣ Assembling puzzle...")
         final_grid = self.greedy_assemble(all_pieces, compatibility_matrix, N)
         
         # Step 4: Build assembled image
@@ -408,15 +527,6 @@ class PaperPuzzleSolver:
                     x_start = c * piece_width
                     assembled[y_start:y_start+piece_height, 
                             x_start:x_start+piece_width] = all_pieces[piece_idx]
-        
-        # Apply orientation correction
-        print("4️⃣ Checking orientation...")
-        assembled = self.correct_orientation(assembled, all_pieces)
-        
-        # Step 5: Evaluate
-        print("5️⃣ Evaluating assembly...")
-        score = self.evaluate_assembly(final_grid, compatibility_matrix, N)
-        print(f"✅ Assembly score: {score:.3f}")
         
         return final_grid, compatibility_matrix, best_buddies, assembled
     
@@ -436,113 +546,10 @@ class PaperPuzzleSolver:
             for k in range(4):
                 angle = k * 90
                 img_rot = rotate_image_90_times(p_img, k)
-                raw_edges = extract_rectangular_edges(img_rot)
-                descriptors = {
-                    e: describe_edge_color_pattern(raw_edges[e])
-                    for e in raw_edges
-                }
-                rotations[angle] = {
-                    'image': img_rot,
-                    'descriptors': descriptors
-                }
+                rotations[angle] = img_rot
             all_piece_rotations.append(rotations)
         
         return all_comparisons, all_piece_rotations, best_buddies
-    
-    
-    def analyze_all_possible_matches_paper_based(self, all_piece_images, piece_files, N):
-        """
-        NEW: Use simplified paper's algorithms for matching
-        """
-        print(f"\n📊 Running paper-based puzzle solver on {len(all_piece_images)} pieces")
-        
-        # Solve puzzle
-        final_grid, compatibility_matrix, best_buddies, assembled = self.solve(all_piece_images)
-        
-        # Convert to comparison format for visualization
-        all_comparisons = []
-        num_pieces = len(all_piece_images)
-        
-        # Create comparisons from compatibility matrix
-        relations = ['right', 'left', 'top', 'bottom']
-        for i in range(num_pieces):
-            for j in range(num_pieces):
-                if i == j:
-                    continue
-                for rel_idx, rel in enumerate(relations):
-                    opp_rel = {'right': 'left', 'left': 'right', 
-                              'top': 'bottom', 'bottom': 'top'}[rel]
-                    
-                    all_comparisons.append({
-                        'piece1': i,
-                        'piece2': j,
-                        'edge1': rel,
-                        'edge2': opp_rel,
-                        'rotation_of_piece2': 0,
-                        'score': float(compatibility_matrix[i, j, rel_idx]),
-                        'label': f"P{i+1} {rel} ↔ P{j+1} {opp_rel}",
-                        'method': 'paper'
-                    })
-        
-        # Sort by score
-        all_comparisons.sort(key=lambda x: x['score'], reverse=True)
-        
-        # Keep rotation structure for compatibility (optional)
-        all_piece_rotations = []
-        for p_img in all_piece_images:
-            rotations = {}
-            for k in range(4):
-                angle = k * 90
-                img_rot = rotate_image_90_times(p_img, k)
-                raw_edges = extract_rectangular_edges(img_rot)
-                descriptors = {
-                    e: describe_edge_color_pattern(raw_edges[e])
-                    for e in raw_edges
-                }
-                rotations[angle] = {
-                    'image': img_rot,
-                    'descriptors': descriptors
-                }
-            all_piece_rotations.append(rotations)
-        
-        print(f"✅ Paper solver completed. Found {len(best_buddies)} best-buddy pairs")
-        
-        return all_comparisons, all_piece_rotations, final_grid, best_buddies
-    
-    def analyze_all_possible_matches_rotation_aware(self, all_piece_images, piece_files, N):
-        """
-        KEPT FOR BACKWARD COMPATIBILITY
-        Calls the new paper-based function but returns same format
-        """
-        return self.analyze_all_possible_matches_paper_based(all_piece_images, piece_files, N)
-    
-    @staticmethod
-    def debug_edge_descriptors(piece_images):
-        """
-        Debug function to check if edge descriptors are working properly
-        """
-        print("\n🔍 DEBUG: Edge Descriptor Analysis")
-        print("-" * 50)
-        
-        for i, img in enumerate(piece_images[:2]):  # Check first 2 pieces
-            print(f"\nPiece {i+1} (shape: {img.shape})")
-            
-            # Get edges
-            edges = extract_rectangular_edges(img)
-            
-            for edge_name, edge_pixels in edges.items():
-                # Show edge statistics
-                print(f"  {edge_name}: shape={edge_pixels.shape}")
-                
-                # Get descriptor
-                desc = describe_edge_color_pattern(edge_pixels)
-                print(f"    Descriptor length: {len(desc)}")
-                print(f"    Descriptor range: [{desc.min():.3f}, {desc.max():.3f}]")
-                print(f"    Descriptor mean: {desc.mean():.3f}")
-                
-                # Show first few values
-                if len(desc) > 0:
-                    print(f"    First 5 values: {desc[:5]}")
     
     # ========== UTILITY METHODS ==========
     
@@ -553,7 +560,7 @@ class PaperPuzzleSolver:
         total_score = 0
         num_pairs = 0
         
-        rel_to_idx = {'right': 0, 'left': 1, 'top': 2, 'bottom': 3}
+        relations = ['right', 'left', 'top', 'bottom']
         
         for r in range(N):
             for c in range(N):
@@ -572,41 +579,5 @@ class PaperPuzzleSolver:
                     num_pairs += 1
         
         return total_score / num_pairs if num_pairs > 0 else 0
-    
-    def correct_orientation(self, assembled_img, all_piece_images):
-        """
-        Detect if assembled image needs rotation correction
-        """
-        # Convert to grayscale for analysis
-        gray = cv2.cvtColor(assembled_img, cv2.COLOR_BGR2GRAY)
-        
-        # Check for text-like features (text tends to be in upper half)
-        h, w = gray.shape
-        top_half = gray[:h//2, :]
-        bottom_half = gray[h//2:, :]
-        
-        # Text regions typically have higher variance
-        top_variance = np.var(top_half)
-        bottom_variance = np.var(bottom_half)
-        
-        # If bottom has higher variance, image might be upside down
-        if bottom_variance > top_variance * 1.5:
-            print("   ↻ Detected possible upside-down orientation, rotating 180°")
-            assembled_img = cv2.rotate(assembled_img, cv2.ROTATE_180)
-        
-        # Check left/right orientation using edge detection
-        left_half = gray[:, :w//2]
-        right_half = gray[:, w//2:]
-        
-        left_edges = cv2.Canny(left_half, 50, 150)
-        right_edges = cv2.Canny(right_half, 50, 150)
-        
-        left_edge_density = np.sum(left_edges > 0) / left_edges.size
-        right_edge_density = np.sum(right_edges > 0) / right_edges.size
-        
-        # If left side has significantly more edges, might need horizontal flip
-        if left_edge_density > right_edge_density * 1.3:
-            print("   ↔ Detected possible mirrored orientation, flipping horizontally")
-            assembled_img = cv2.flip(assembled_img, 1)
-        
-        return assembled_img
+
+

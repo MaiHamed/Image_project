@@ -13,10 +13,10 @@ from descriptor_assembler import DescriptorBasedAssembler
 
 def run_paper_algorithm_with_fix(all_piece_images, piece_files, N, puzzle_id, puzzle_output_dir):
     """
-    Run paper algorithm with fixes for common issues - SIMPLIFIED VERSION
+    Run paper algorithm with simpler but more effective assembly
     """
     print(f"\n📘 PAPER ALGORITHM")
-    print("   Method: Pomeranz et al. (2011) - Prediction-based compatibility")
+    print("   Method: Pomeranz et al. (2011) - Simple Greedy Assembly")
     
     results = {
         'success': False,
@@ -34,69 +34,49 @@ def run_paper_algorithm_with_fix(all_piece_images, piece_files, N, puzzle_id, pu
         # Initialize solver
         solver = PaperPuzzleSolver(p=0.3, q=1/16, use_prediction=True, border_width=10)
         
-        # Step 1: Compute pairwise comparisons for visualization
+        # Step 1: Compute pairwise comparisons
         print("   Step 1: Computing pairwise comparisons...")
         all_comparisons, all_piece_rotations, best_buddies = solver.solve_for_comparisons(all_piece_images)
 
-        # Step 2: Build robust compatibility matrix
+        # Step 2: Build compatibility matrix
         print("   Step 2: Building compatibility matrix...")
         compatibility_matrix = solver.build_compatibility_matrix(all_piece_images)
-
-        # Step 3: Safely assemble puzzle
-        print("   Step 3: Assembling puzzle...")
+        
+        # Step 3: Use the solver's own assembly method
+        print("   Step 3: Assembling puzzle with improved greedy algorithm...")
+        
         try:
-            # First try the regular greedy assemble
+            # Use the improved greedy assembly
             final_grid = solver.greedy_assemble(all_piece_images, compatibility_matrix, N)
+            print(f"   ✓ Assembly completed")
         except Exception as e:
-            print(f"   ⚠️ First assembly failed: {e}, trying fallback...")
-            try:
-                # Try the fixed version
-                final_grid = solver.greedy_assemble_fixed(all_piece_images, compatibility_matrix, N)
-            except Exception as e2:
-                print(f"   ⚠️ Fixed assembly failed: {e2}, creating simple grid...")
-                # Create a simple sequential grid as last resort
-                final_grid = []
-                piece_idx = 0
-                for r in range(N):
-                    row = []
-                    for c in range(N):
-                        if piece_idx < len(all_piece_images):
-                            row.append(piece_idx)
-                            piece_idx += 1
-                        else:
-                            row.append(None)
-                    final_grid.append(row)
+            print(f"   ⚠️ Improved assembly failed: {e}")
+            # Fallback to simple sequential placement
+            final_grid = []
+            piece_idx = 0
+            for r in range(N):
+                row = []
+                for c in range(N):
+                    if piece_idx < len(all_piece_images):
+                        row.append(piece_idx)
+                        piece_idx += 1
+                    else:
+                        row.append(None)
+                final_grid.append(row)
+            print(f"   ⚠️ Using fallback sequential placement")
 
         results['all_comparisons'] = all_comparisons
         results['all_piece_rotations'] = all_piece_rotations
         results['final_grid'] = final_grid
         results['best_buddies'] = best_buddies
         
-        print(f"✅ Paper Algorithm analysis completed")
+        print(f"\n✅ Paper Algorithm analysis completed")
         print(f"   Found {len(all_comparisons)} comparisons")
+        print(f"   Found {len(best_buddies)} best-buddy pairs")
         print(f"   Grid size: {N}x{N}")
         
-        # ========== VISUALIZATION: Heatmap ==========
+        # Show top matches
         if all_comparisons:
-            print(f"\n📊 VISUALIZING ALL MATCHES (Heatmap)")
-            try:
-                # Create dummy piece files list for compatibility
-                dummy_piece_files = [f"piece_{i}" for i in range(len(all_piece_images))]
-                visualize_comparison_heatmap(
-                    all_comparisons, dummy_piece_files, N, f"Paper Algorithm - Puzzle {puzzle_id}"
-                )
-            except Exception as e:
-                print(f"   ⚠️ Heatmap visualization failed: {e}")
-        
-        # ========== VISUALIZATION: Top matches with connecting lines ==========
-        if all_comparisons:
-            print(f"\n🔗 VISUALIZING TOP MATCHES")
-            try:
-                visualize_matches_with_lines(all_piece_images, all_comparisons, top_n=5)
-            except Exception as e:
-                print(f"   ⚠️ Match visualization failed: {e}")
-                
-            # Print top matches
             sorted_comparisons = sorted(all_comparisons, key=lambda x: x['score'], reverse=True)
             print(f"\n🏆 TOP 5 MATCHES:")
             for idx in range(min(5, len(sorted_comparisons))):
@@ -110,23 +90,22 @@ def run_paper_algorithm_with_fix(all_piece_images, piece_files, N, puzzle_id, pu
             
             try:
                 # Assemble the grid
-                assembled_paper = assemble_grid_from_pieces(all_piece_images, final_grid, N=N, rotations=all_piece_rotations)
+                assembled_paper = assemble_grid_from_pieces(all_piece_images, final_grid, N=N)
                 
                 if assembled_paper is not None:
                     results['assembled_image'] = assembled_paper
                     
-                    # Calculate simple score based on comparisons
+                    # Calculate simple score
                     if all_comparisons:
-                        # Use top 5 scores to calculate grid score
-                        top_scores = [c['score'] for c in all_comparisons[:min(5, len(all_comparisons))]]
-                        grid_score = np.mean(top_scores) if top_scores else 0.5
+                        # Evaluate grid quality
+                        grid_score = solver.evaluate_assembly(final_grid, compatibility_matrix, N)
                         
-                        # Calculate average of all scores
-                        all_scores = [c['score'] for c in all_comparisons]
-                        avg_score = np.mean(all_scores) if all_scores else 0.5
+                        # Calculate average of top scores
+                        top_scores = [c['score'] for c in sorted_comparisons[:min(10, len(sorted_comparisons))]]
+                        top_score_avg = np.mean(top_scores) if top_scores else 0.5
                         
-                        # Combined score: 70% top scores, 30% average score
-                        combined_score = 0.7 * grid_score + 0.3 * avg_score
+                        # Combined score: 60% grid score, 40% top matches
+                        combined_score = 0.6 * grid_score + 0.4 * top_score_avg
                     else:
                         grid_score = 0.5
                         combined_score = 0.5
@@ -137,6 +116,7 @@ def run_paper_algorithm_with_fix(all_piece_images, piece_files, N, puzzle_id, pu
                     print(f"\n   📊 Assembly Statistics:")
                     print(f"   📈 Scores:")
                     print(f"      - Grid compatibility: {grid_score:.3f}")
+                    print(f"      - Top match quality: {top_score_avg:.3f}")
                     print(f"      - Combined score: {combined_score:.3f}")
                     
                     # Visualize the assembled result
@@ -186,29 +166,6 @@ def run_paper_algorithm_with_fix(all_piece_images, piece_files, N, puzzle_id, pu
                 print(f"   ⚠️ Assembly failed: {e}")
                 import traceback
                 traceback.print_exc()
-                
-                # Try simple fallback assembly without rotations
-                try:
-                    assembled_paper = assemble_grid_from_pieces(all_piece_images, final_grid, N=N)
-                    if assembled_paper is not None:
-                        results['assembled_image'] = assembled_paper
-                        results['success'] = True
-                        
-                        plt.figure(figsize=(8, 8))
-                        plt.imshow(cv2.cvtColor(assembled_paper, cv2.COLOR_BGR2RGB))
-                        plt.title(f"Paper Algorithm - Puzzle {puzzle_id} ({N}x{N})\nFallback Assembly", 
-                                 fontsize=14, fontweight='bold')
-                        plt.axis('off')
-                        plt.show()
-                        
-                        paper_save_path = os.path.join(puzzle_output_dir, f"paper_assembled_{puzzle_id}_fallback.jpg")
-                        cv2.imwrite(paper_save_path, assembled_paper)
-                        results['save_path'] = paper_save_path
-                        results['grid_score'] = 0.5
-                        results['combined_score'] = 0.5
-                        print(f"   💾 Saved fallback assembly to: {paper_save_path}")
-                except Exception as e2:
-                    print(f"   ⚠️ Fallback assembly also failed: {e2}")
         else:
             print("   ⚠️ No grid assembly from paper solver")
             
