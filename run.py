@@ -290,18 +290,6 @@ def main():
                         piece
                     )
 
-                # 🧠 Solve puzzle
-                placement = solve_puzzle_from_pieces(pieces, grid_n=N)
-
-                # 🧩 Reconstruct solved image
-                solved = reconstruct_image(pieces, placement, N)
-
-                # 💾 Save solved result
-                cv2.imwrite(
-                    os.path.join(solved_dir, f"solved_{filename}"),
-                    solved
-                )
-
                 # 🤖 Solve puzzle (Descriptor-based)
                 descriptor_results = run_descriptor_algorithm_with_improvement(
                     pieces,
