@@ -3,7 +3,7 @@ DUAL ALGORITHM COMPARISON - Puzzle 1 (2x2)
 
 PAPER ALGORITHM RESULTS:
   • Success: ✓
-  • Combined Score: 0.895
+  • Combined Score: 0.833
 
 DESCRIPTOR ALGORITHM RESULTS:
   • Success: ✓
@@ -12,4 +12,4 @@ DESCRIPTOR ALGORITHM RESULTS:
   • Saved to: /Users/maiab/Desktop/Image project/processed_puzzles/puzzle_2x2/descriptor_assembled_1.jpg
 
 COMPARISON:
-  • Winner: Paper Algorithm (by 0.159)
+  • Winner: Paper Algorithm (by 0.096)

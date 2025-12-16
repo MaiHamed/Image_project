@@ -25,22 +25,23 @@ class PaperPuzzleSolver:
         self.border_width = border_width
         
     def extract_edge_region(self, piece, edge_type):
-        """
-        Extract a border region (not just 1 pixel)
-        """
         h, w = piece.shape[:2]
+
         bw = self.border_width
-        
+        if edge_type in ('top', 'bottom'):
+            bw = int(self.border_width * 1.8)
+
+        bw = min(bw, h//2, w//2)
+
         if edge_type == 'right':
-            return piece[:, -bw:, :] if len(piece.shape) == 3 else piece[:, -bw:]
+            return piece[:, -bw:, :]
         elif edge_type == 'left':
-            return piece[:, :bw, :] if len(piece.shape) == 3 else piece[:, :bw]
+            return piece[:, :bw, :]
         elif edge_type == 'top':
-            return piece[:bw, :, :] if len(piece.shape) == 3 else piece[:bw, :]
+            return piece[:bw, :, :]
         elif edge_type == 'bottom':
-            return piece[-bw:, :, :] if len(piece.shape) == 3 else piece[-bw:, :]
-        return None
-    
+            return piece[-bw:, :, :]
+
     # ========== COMPATIBILITY METRICS ==========
     
     def Lp_norm_compatibility(self, piece1, piece2, relation):
@@ -72,57 +73,59 @@ class PaperPuzzleSolver:
     
     def prediction_based_compatibility(self, piece1, piece2, relation):
         """
-        Prediction-based compatibility from Eq. 6
-        Uses Taylor expansion to predict boundary
+        Prediction-based compatibility (SAFE variant)
+        Only increases vertical context
         """
+
         bw = self.border_width
-        
-        # Extract edge regions and adjacent regions
+        if relation in ('top', 'bottom'):
+            bw = int(bw * 1.5)
+        bw = max(2, bw)
+
         if relation == 'right':
-            # piece1's right edge and left of it
-            edge1 = piece1[:, -bw:, :]
+            edge1  = piece1[:, -bw:, :]
             inner1 = piece1[:, -2*bw:-bw, :]
-            # piece2's left edge and right of it
-            edge2 = piece2[:, :bw, :]
+            edge2  = piece2[:, :bw, :]
             inner2 = piece2[:, bw:2*bw, :]
+
         elif relation == 'left':
-            edge1 = piece1[:, :bw, :]
+            edge1  = piece1[:, :bw, :]
             inner1 = piece1[:, bw:2*bw, :]
-            edge2 = piece2[:, -bw:, :]
+            edge2  = piece2[:, -bw:, :]
             inner2 = piece2[:, -2*bw:-bw, :]
+
         elif relation == 'top':
-            edge1 = piece1[:bw, :, :]
+            edge1  = piece1[:bw, :, :]
             inner1 = piece1[bw:2*bw, :, :]
-            edge2 = piece2[-bw:, :, :]
+            edge2  = piece2[-bw:, :, :]
             inner2 = piece2[-2*bw:-bw, :, :]
+
         elif relation == 'bottom':
-            edge1 = piece1[-bw:, :, :]
+            edge1  = piece1[-bw:, :, :]
             inner1 = piece1[-2*bw:-bw, :, :]
-            edge2 = piece2[:bw, :, :]
+            edge2  = piece2[:bw, :, :]
             inner2 = piece2[bw:2*bw, :, :]
-        
-        # Resize to same dimensions if needed
-        if edge1.shape != edge2.shape:
-            min_h = min(edge1.shape[0], edge2.shape[0])
-            min_w = min(edge1.shape[1], edge2.shape[1])
-            edge1 = cv2.resize(edge1, (min_w, min_h))
-            edge2 = cv2.resize(edge2, (min_w, min_h))
-            inner1 = cv2.resize(inner1, (min_w, min_h))
-            inner2 = cv2.resize(inner2, (min_w, min_h))
-        
-        # Prediction: 2*edge - inner (Taylor expansion)
-        pred1 = 2 * edge1.astype(np.float32) - inner1.astype(np.float32)
-        pred2 = 2 * edge2.astype(np.float32) - inner2.astype(np.float32)
-        
-        # Calculate prediction errors with (L_p)^q
-        error1 = np.abs(pred1 - edge2.astype(np.float32)) ** self.p
-        error2 = np.abs(pred2 - edge1.astype(np.float32)) ** self.p
-        
-        total_error = np.sum(error1) + np.sum(error2)
-        D = total_error ** (self.q / self.p)
-        
-        return D
-    
+
+        # normalize shapes
+        min_h = min(edge1.shape[0], edge2.shape[0])
+        min_w = min(edge1.shape[1], edge2.shape[1])
+
+        edge1  = cv2.resize(edge1,  (min_w, min_h)).astype(np.float32)
+        edge2  = cv2.resize(edge2,  (min_w, min_h)).astype(np.float32)
+        inner1 = cv2.resize(inner1, (min_w, min_h)).astype(np.float32)
+        inner2 = cv2.resize(inner2, (min_w, min_h)).astype(np.float32)
+
+        # ORIGINAL Taylor (do NOT change this yet)
+        pred1 = 2 * edge1 - inner1
+        pred2 = 2 * edge2 - inner2
+
+        error = (
+            np.abs(pred1 - edge2) ** self.p +
+            np.abs(pred2 - edge1) ** self.p
+        )
+
+        return np.sum(error) ** (self.q / self.p)
+
     def compute_dissimilarity(self, piece1, piece2, relation):
         """
         Compute dissimilarity (lower = better match)
@@ -417,6 +420,109 @@ class PaperPuzzleSolver:
         
         return grid
     
+    def greedy_assemble_correct(self, compatibility_matrix, N):
+        num_pieces = compatibility_matrix.shape[0]
+        placed = {}        # piece -> (r,c)
+        grid = {}          # (r,c) -> piece
+        used = set()
+
+        relations = {
+            'right':  (0, 1, 0),
+            'left':   (0,-1, 1),
+            'top':    (-1,0, 2),
+            'bottom': (1, 0, 3)
+        }
+        rel_names = ['right','left','top','bottom']
+        opposite = {0:1, 1:0, 2:3, 3:2}
+
+        # ---------- start from strongest best-buddy ----------
+        best = (-1,None,None,None)
+        for i in range(num_pieces):
+            for j in range(num_pieces):
+                if i == j: continue
+                for d in range(4):
+                    s = compatibility_matrix[i,j,d]
+                    if s > best[0]:
+                        best = (s,i,j,d)
+
+        _, p1, p2, d = best
+        placed[p1] = (0,0)
+        grid[(0,0)] = p1
+        used.add(p1)
+
+        dr, dc, _ = relations[rel_names[d]]
+        placed[p2] = (dr,dc)
+        grid[(dr,dc)] = p2
+        used.add(p2)
+
+        frontier = [p1, p2]
+
+        # ---------- grow puzzle ----------
+        while frontier and len(used) < num_pieces:
+            current = frontier.pop(0)
+            r, c = placed[current]
+
+            for d in range(4):
+                best_score = -1
+                best_piece = None
+
+                for cand in range(num_pieces):
+                    if cand in used: continue
+                    score = compatibility_matrix[current, cand, d]
+                    if score > best_score:
+                        best_score = score
+                        best_piece = cand
+
+                if best_piece is None:
+                    continue
+
+                dr, dc, _ = relations[rel_names[d]]
+                pos = (r+dr, c+dc)
+
+                # conflict check
+                if pos in grid:
+                    continue
+
+                # neighbor consistency
+                ok = True
+                for od in range(4):
+                    ndr, ndc, idx = relations[rel_names[od]]
+                    neighbor_pos = (pos[0]+ndr, pos[1]+ndc)
+                    if neighbor_pos in grid:
+                        neighbor = grid[neighbor_pos]
+                        if compatibility_matrix[best_piece, neighbor, idx] < 0.5:
+                            ok = False
+                            break
+
+                if not ok:
+                    continue
+
+                placed[best_piece] = pos
+                grid[pos] = best_piece
+                used.add(best_piece)
+                frontier.append(best_piece)
+
+        # ---------- normalize grid ----------
+        rows = [p[0] for p in placed.values()]
+        cols = [p[1] for p in placed.values()]
+        min_r, min_c = min(rows), min(cols)
+
+        final = [[None]*N for _ in range(N)]
+        for piece,(r,c) in placed.items():
+            rr, cc = r-min_r, c-min_c
+            if 0 <= rr < N and 0 <= cc < N:
+                final[rr][cc] = piece
+
+        # fill leftovers
+        unused = [p for p in range(num_pieces) if p not in used]
+        for r in range(N):
+            for c in range(N):
+                if final[r][c] is None:
+                    final[r][c] = unused.pop(0)
+
+        return final
+
+
     # ========== ANALYSIS METHODS ==========
     
     def find_best_buddies(self, compatibility_matrix):
@@ -511,7 +617,7 @@ class PaperPuzzleSolver:
         best_buddies = self.find_best_buddies(compatibility_matrix)
         
         # Step 3: Greedy assembly
-        final_grid = self.greedy_assemble(all_pieces, compatibility_matrix, N)
+        final_grid = self.greedy_assemble_correct(compatibility_matrix, N)
         
         # Step 4: Build assembled image
         piece_height, piece_width = all_pieces[0].shape[:2]
