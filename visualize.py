@@ -444,36 +444,58 @@ def visualize_descriptor_result(assembled_image, puzzle_id, N, assembly_score, s
     """
     if assembled_image is None:
         print("   ⚠️ No assembled image to visualize")
-        return
+        return None
 
     # Color code quality
-    if assembly_score > 0.3:
+    if assembly_score > 0.7:
         color, quality = "green", "Excellent"
-    elif assembly_score > 0.2:
+    elif assembly_score > 0.5:
         color, quality = "orange", "Good"
-    elif assembly_score > 0.1:
+    elif assembly_score > 0.3:
         color, quality = "yellow", "Fair"
     else:
         color, quality = "red", "Poor"
 
+    # Create figure and display
     if show:
-        plt.figure(figsize=(8, 8))
-        plt.imshow(cv2.cvtColor(assembled_image, cv2.COLOR_BGR2RGB))
+        plt.figure(figsize=(10, 10))
+        
+        # Convert BGR to RGB for proper matplotlib display
+        if len(assembled_image.shape) == 3 and assembled_image.shape[2] == 3:
+            # Check if it's BGR (OpenCV format)
+            if assembled_image.dtype == np.uint8:
+                display_img = cv2.cvtColor(assembled_image, cv2.COLOR_BGR2RGB)
+            else:
+                display_img = assembled_image
+        else:
+            display_img = assembled_image
+        
+        plt.imshow(display_img)
         plt.title(
             f"Descriptor Algorithm - Puzzle {puzzle_id} ({N}x{N})\n"
             f"Score: {assembly_score:.3f} | Quality: {quality}",
             fontsize=14, fontweight='bold', color=color
         )
         plt.axis('off')
+        
+        # Add score annotation
         plt.figtext(
             0.5, 0.02,
-            f"Assembly Score: {assembly_score:.3f}",
-            ha='center', fontsize=10,
-            bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.8)
+            f"Assembly Score: {assembly_score:.3f} | Grid: {N}x{N}",
+            ha='center', fontsize=12,
+            bbox=dict(boxstyle="round,pad=0.5", facecolor="lightblue", alpha=0.8)
         )
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0.03, 1, 0.97])  # Adjust for figtext
         plt.show()
+        print(f"   ✅ Displaying assembled image for puzzle {puzzle_id}")
 
     if save_path:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        
+        # Save image
         cv2.imwrite(save_path, assembled_image)
         print(f"   💾 Descriptor result saved to: {save_path}")
+    
+    return assembled_image
+

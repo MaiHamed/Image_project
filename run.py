@@ -24,10 +24,11 @@ def reconstruct_image(pieces, placement, grid_n):
 def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, puzzle_output_dir):
     """
     Run descriptor algorithm with improved scoring and save visualizations.
-    Saves outputs in organized subfolders: heatmaps, top_matches, best_assembled
+    Now uses MSE-based approach similar to the working code.
     """
     print(f"\n🤖 DESCRIPTOR-BASED ALGORITHM")
-    print("   Method: Enhanced edge descriptors with better discrimination")
+    print("   Method: MSE-based edge comparison (LAB + gradients)")
+    print(f"   Grid size: {N}x{N}")
     
     results = {
         'success': False,
@@ -42,7 +43,7 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
     
     try:
         # Solve puzzle
-        descriptor_assembler = DescriptorBasedAssembler(border_width=8, descriptor_length=100)
+        descriptor_assembler = DescriptorBasedAssembler(border_width=3, descriptor_length=100)
         all_comparisons, all_piece_rotations, final_grid, best_buddies, assembly_score = \
             descriptor_assembler.solve(all_piece_images)
         
@@ -54,7 +55,8 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
             'assembly_score': assembly_score
         })
         
-        print(f"✅ Descriptor Algorithm analysis completed (Score: {assembly_score:.3f})")
+        print(f"✅ Descriptor Algorithm analysis completed")
+        print(f"   Assembly score: {assembly_score:.3f}")
         
         # --- Create organized subfolders ---
         heatmap_dir = os.path.join(puzzle_output_dir, "heatmaps")
@@ -90,7 +92,6 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
         except Exception as e:
             print(f"   ⚠️ Top match visualization failed: {e}")
 
-        
         # --- Assemble final grid ---
         if final_grid is not None:
             assembled_descriptor = assemble_grid_from_pieces(all_piece_images, final_grid, N=N)
@@ -102,7 +103,7 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
                 puzzle_id=puzzle_id,
                 N=N,
                 assembly_score=assembly_score,
-                show=False,   # Do not pop up window
+                show=True,   # Do not pop up window
                 save_path=assembled_path
             )
             results['save_paths']['assembled'] = assembled_path

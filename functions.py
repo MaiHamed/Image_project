@@ -187,3 +187,23 @@ def get_rotation_from_rotations_dict(rotations_dict):
     
     # Default: no rotation
     return 0
+
+
+def assemble_2x2(pieces, order):
+    """
+    Assemble 2x2 puzzle given the piece order
+    order: [top_left, top_right, bottom_left, bottom_right]
+    """
+    if len(pieces) != 4:
+        raise ValueError("2x2 assembly requires exactly 4 pieces")
+    
+    h, w = pieces[0].shape[:2]
+    assembled = np.zeros((2*h, 2*w, 3), dtype=np.uint8)
+    
+    # Place pieces according to order
+    assembled[0:h, 0:w] = pieces[order[0]]       # Top-left
+    assembled[0:h, w:2*w] = pieces[order[1]]     # Top-right
+    assembled[h:2*h, 0:w] = pieces[order[2]]     # Bottom-left
+    assembled[h:2*h, w:2*w] = pieces[order[3]]   # Bottom-right
+    
+    return assembled
