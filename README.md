@@ -10,7 +10,7 @@ Both approaches are enhanced with advanced preprocessing, robust matching strate
 
 ---
 
-## 📐 Pipeline Architecture
+##  Pipeline Architecture
 
 The system follows a **modular, multi-stage pipeline**, designed for robustness and extensibility.
 
