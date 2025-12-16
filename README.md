@@ -8,13 +8,11 @@ The system implements **two complementary approaches**:
 
 Both approaches are enhanced with advanced preprocessing, robust matching strategies, and detailed visualization tools.
 
----
+
 
 ##  Pipeline Architecture
 
 The system follows a **modular, multi-stage pipeline**, designed for robustness and extensibility.
-
----
 
 ## Input & Preprocessing
 
@@ -46,8 +44,6 @@ The system follows a **modular, multi-stage pipeline**, designed for robustness 
 * **Gamma correction** for global lightness control
 * **Canny edge detection** for boundary analysis
 
----
-
 ##  Grid Detection & Piece Extraction
 
 ### Grid Size Detection
@@ -63,13 +59,13 @@ The system follows a **modular, multi-stage pipeline**, designed for robustness 
 * Ensures consistent dimensions across all pieces
 * Required for fair descriptor comparison
 
----
+
 
 ##  Edge Representation & Feature Extraction
 
 Two **parallel edge compatibility strategies** are implemented.
 
----
+
 
 ### 🔹 Descriptor-Based Approach
 
@@ -100,7 +96,7 @@ Two **parallel edge compatibility strategies** are implemented.
 * Strict range: **[0.01, 0.99]**
 * Centered around ~0.6 for better ranking stability
 
----
+
 
 ### 🔹 Paper-Based Approach (Pomeranz et al., 2011)
 
@@ -126,7 +122,7 @@ Two **parallel edge compatibility strategies** are implemented.
 * Reciprocal best matches
 * Used for robust puzzle initialization
 
----
+
 
 ##  Matching & Assembly
 
@@ -154,7 +150,7 @@ Two **parallel edge compatibility strategies** are implemented.
 
 * Final score = **average edge compatibility** across the grid
 
----
+
 
 ##  Visualization & Output
 
@@ -182,11 +178,11 @@ Two **parallel edge compatibility strategies** are implemented.
 * Reconstructed puzzle
 * Overall quality score
 
----
 
-## 🧠 Design Decisions & Justifications
 
----
+##  Design Decisions & Justifications
+
+
 
 ## Preprocessing Decisions
 
@@ -204,7 +200,7 @@ Two **parallel edge compatibility strategies** are implemented.
 
 * Noise reduced without harming edge descriptors
 
----
+
 
 ### 2. Multi-Stage Enhancement
 
@@ -212,7 +208,7 @@ Two **parallel edge compatibility strategies** are implemented.
 * **Luminance sharpening**: Enhances detail without color artifacts
 * **Gamma correction**: Improves edge discrimination
 
----
+
 
 ### 3. Dynamic Border Width
 
@@ -224,7 +220,7 @@ Two **parallel edge compatibility strategies** are implemented.
 * Vertical edges often contain less variation
 * Wider borders improve descriptor richness
 
----
+
 
 ## Descriptor Design Decisions
 
@@ -238,7 +234,7 @@ Two **parallel edge compatibility strategies** are implemented.
 
 * Captures both fine and coarse texture patterns
 
----
+
 
 ### 3. Score Limitation Strategy
 
@@ -255,7 +251,7 @@ Two **parallel edge compatibility strategies** are implemented.
 
 * Stable ranking of good vs. excellent matches
 
----
+
 
 ## Matching Algorithm Decisions
 
@@ -268,7 +264,7 @@ Two **parallel edge compatibility strategies** are implemented.
 
 * Both methods inform confidence estimation
 
----
+
 
 ### 2. Multi-Start Assembly
 
@@ -282,7 +278,7 @@ Two **parallel edge compatibility strategies** are implemented.
 * Light backtracking
 * Early termination using consistency checks
 
----
+
 
 ### 3. Mutual Best Buddies Advantage
 
@@ -290,7 +286,7 @@ Two **parallel edge compatibility strategies** are implemented.
 * Strong puzzle initialization
 * Reduced error propagation
 
----
+
 
 ## Key Innovations
 
@@ -299,7 +295,6 @@ Two **parallel edge compatibility strategies** are implemented.
 * **Robust assembly** with multi-start and neighbor validation
 * **Comprehensive visualization tools** for analysis and debugging
 
----
 
 ##  Reference
 
