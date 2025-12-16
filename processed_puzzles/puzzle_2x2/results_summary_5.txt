@@ -1,6 +1,0 @@
-PUZZLE ASSEMBLY RESULTS - Puzzle 5 (2x2)
-============================================================
-
-PAPER ALGORITHM - ORIENTATION ANALYSIS:
-
-3. FINAL ASSEMBLIES:

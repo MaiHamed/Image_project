@@ -3,55 +3,54 @@ import numpy as np
 
 class DescriptorBasedAssembler:
     """
-    Upgraded descriptor-based assembler using top matches and multi-strategy assembly.
-    Handles small edges, descriptor smoothing, and multi-edge consistency.
+    Enhanced descriptor-based assembler using color + gradient profiles.
+    Improved for larger puzzles while keeping original logic.
     """
 
-    def __init__(self, border_width=10, descriptor_length=100):
+    def __init__(self, border_width=10, descriptor_length=100, top_k_matches=20):
         self.border_width = border_width
         self.descriptor_length = descriptor_length
+        self.top_k_matches = top_k_matches
 
     # --- Edge descriptor computation ---
     def describe_edge_color_pattern(self, edge_pixels):
         if edge_pixels is None or len(edge_pixels) == 0:
             return np.full(self.descriptor_length, 0.5, dtype=np.float32)
 
+        # Convert to gray if needed
         gray = cv2.cvtColor(edge_pixels, cv2.COLOR_BGR2GRAY) if edge_pixels.ndim == 3 else edge_pixels
         h, w = gray.shape
 
-        # Middle row/column profile
+        # Profiles
         profile1 = gray[:, w//2].astype(np.float32) if h > w else gray[h//2, :].astype(np.float32)
-
-        # Row + column average profile
         row_profile = gray[h//2, :].astype(np.float32)
         col_profile = gray[:, w//2].astype(np.float32)
         profile2 = (row_profile + col_profile[:len(row_profile)]) / 2.0 if len(row_profile) == len(col_profile) else row_profile
 
-        # Resample to same length
+        # Resample to uniform length
         target_len = max(len(profile1), len(profile2))
         profile1_resampled = np.interp(np.linspace(0, 1, target_len), np.linspace(0, 1, len(profile1)), profile1)
         profile2_resampled = np.interp(np.linspace(0, 1, target_len), np.linspace(0, 1, len(profile2)), profile2)
 
-        # Adaptive weighting
+        # Adaptive weighting based on variance
         std1 = np.std(profile1_resampled)
         weight1 = np.clip(0.5 + 0.5*(std1/np.max([std1, 5])), 0.35, 0.75)
-        weight2 = 1 - weight1
-        profile = weight1*profile1_resampled + weight2*profile2_resampled
+        profile = weight1*profile1_resampled + (1-weight1)*profile2_resampled
 
         # Smooth + gradient
-        profile_smooth = cv2.GaussianBlur(profile.reshape(-1,1), (3,1), 1.0).flatten()
+        profile_smooth = cv2.GaussianBlur(profile.reshape(-1,1), (5,1), 1.0).flatten()
         gradient = np.gradient(profile_smooth)
         gradient += 1e-12 * (gradient == 0)
 
         # Normalize and combine
-        profile_norm = (profile_smooth - profile_smooth.min()) / (profile_smooth.max() - profile_smooth.min() + 1e-10)
-        gradient_norm = (gradient - gradient.min()) / (gradient.max() - gradient.min() + 1e-10)
+        profile_norm = (profile_smooth - profile_smooth.min()) / (np.ptp(profile_smooth) + 1e-10)
+        gradient_norm = (gradient - gradient.min()) / (np.ptp(gradient) + 1e-10)
         combined = 0.6*profile_norm + 0.4*gradient_norm
 
         # Interpolate to descriptor length
         descriptor = np.interp(np.linspace(0,1,self.descriptor_length), np.linspace(0,1,len(combined)), combined)
         min_d, max_d = descriptor.min(), descriptor.max()
-        descriptor = 0.1 + 0.8*(descriptor - min_d)/(max_d - min_d + 1e-10) if max_d - min_d > 1e-10 else np.full(self.descriptor_length, 0.5)
+        descriptor = 0.1 + 0.8*(descriptor - min_d)/(max_d - min_d + 1e-10) if max_d-min_d>1e-10 else np.full(self.descriptor_length,0.5)
 
         return descriptor.astype(np.float32)
 
@@ -61,31 +60,29 @@ class DescriptorBasedAssembler:
             return {}
         h, w = piece_img.shape[:2]
         bw = max(min(self.border_width, h//2, w//2), 5)
-        edges = {
+        return {
             'top': piece_img[:bw].copy(),
             'bottom': piece_img[-bw:].copy(),
-            'left': piece_img[:,:bw].copy(),
-            'right': piece_img[:,-bw:].copy()
+            'left': piece_img[:, :bw].copy(),
+            'right': piece_img[:, -bw:].copy()
         }
-        return edges
 
     # --- Edge similarity ---
     def compute_edge_similarity(self, desc1, desc2):
-        if len(desc1)==0 or len(desc2)==0: return 0.0
+        if len(desc1)==0 or len(desc2)==0:
+            return 0.0
         desc1_norm = desc1 - desc1.mean()
         desc2_norm = desc2 - desc2.mean()
         denom = np.sqrt(np.sum(desc1_norm**2) * np.sum(desc2_norm**2))
-        if denom < 1e-4:
-            return 1.0
-        ncc = np.sum(desc1_norm * desc2_norm) / denom
+        if denom < 1e-6:
+            return 0.0
+        ncc = np.sum(desc1_norm*desc2_norm)/denom
         return np.clip(ncc, 0.0, 1.0)
 
     # --- Compute all pairwise comparisons ---
     def compute_all_comparisons(self, all_pieces):
         num_pieces = len(all_pieces)
         all_descriptors = []
-
-        # Extract descriptors
         for piece in all_pieces:
             edges = self.extract_rectangular_edges(piece)
             all_descriptors.append({k: self.describe_edge_color_pattern(v) for k,v in edges.items()})
@@ -97,7 +94,6 @@ class DescriptorBasedAssembler:
                 for edge1, edge2 in [('right','left'), ('left','right'), ('bottom','top'), ('top','bottom')]:
                     score = self.compute_edge_similarity(all_descriptors[i][edge1], all_descriptors[j][edge2])
                     all_comparisons.append({'piece1':i,'piece2':j,'edge1':edge1,'edge2':edge2,'score':score})
-
         return all_comparisons, all_descriptors
 
     # --- Get top matches ---
@@ -106,84 +102,100 @@ class DescriptorBasedAssembler:
         vertical = [c for c in all_comparisons if c['edge1']=='bottom' and c['edge2']=='top']
         horizontal.sort(key=lambda x:x['score'], reverse=True)
         vertical.sort(key=lambda x:x['score'], reverse=True)
-        return horizontal[:10], vertical[:10]
-
-    # --- Evaluate grid ---
-    def evaluate_grid_quality(self, grid, all_comparisons, N):
-        total_score = 0
-        match_count = 0
-        for r in range(N):
-            for c in range(N):
-                piece = grid[r][c]
-                if c<N-1:
-                    right_piece = grid[r][c+1]
-                    for comp in all_comparisons:
-                        if comp['piece1']==piece and comp['piece2']==right_piece and comp['edge1']=='right': 
-                            total_score+=comp['score']; match_count+=1; break
-                if r<N-1:
-                    bottom_piece = grid[r+1][c]
-                    for comp in all_comparisons:
-                        if comp['piece1']==piece and comp['piece2']==bottom_piece and comp['edge1']=='bottom':
-                            total_score+=comp['score']; match_count+=1; break
-        return total_score/match_count if match_count>0 else 0.0
+        return horizontal[:self.top_k_matches], vertical[:self.top_k_matches]
 
     # --- Build grid from top matches ---
     def build_grid_from_top_matches(self, top_horizontal, top_vertical, N):
-        num_pieces = N*N
-        grid = [[None]*N for _ in range(N)]
+        num_pieces = N * N
+        grid = [[None] * N for _ in range(N)]
         used = set()
         grid[0][0] = 0
         used.add(0)
+
         for r in range(N):
             for c in range(N):
-                if r==0 and c==0: continue
+                if r == 0 and c == 0:
+                    continue
                 best_piece, best_score = None, -1
                 for piece in range(num_pieces):
-                    if piece in used: continue
-                    score, matches_used = 0,0
-                    if c>0:
-                        left_piece = grid[r][c-1]
+                    if piece in used:
+                        continue
+                    score, matches_used = 0, 0
+                    if c > 0:
+                        left_piece = grid[r][c - 1]
                         for m in top_horizontal:
-                            if m['piece1']==left_piece and m['piece2']==piece: score+=m['score']; matches_used+=1; break
-                    if r>0:
-                        top_piece = grid[r-1][c]
+                            if m['piece1'] == left_piece and m['piece2'] == piece:
+                                score += m['score']
+                                matches_used += 1
+                                break
+                    if r > 0:
+                        top_piece = grid[r - 1][c]
                         for m in top_vertical:
-                            if m['piece1']==top_piece and m['piece2']==piece: score+=m['score']; matches_used+=1; break
-                    required = (1 if c>0 else 0)+(1 if r>0 else 0)
-                    if matches_used<required: continue
-                    if matches_used==2: score*=1.2
-                    if score>best_score: best_score=score; best_piece=piece
-                if best_piece is None: best_piece = [p for p in range(num_pieces) if p not in used][0]
+                            if m['piece1'] == top_piece and m['piece2'] == piece:
+                                score += m['score']
+                                matches_used += 1
+                                break
+                    required = (1 if c > 0 else 0) + (1 if r > 0 else 0)
+                    if matches_used < required:
+                        continue
+                    if matches_used == 2:
+                        score *= 1.2
+                    if score > best_score:
+                        best_score = score
+                        best_piece = piece
+                # fallback: pick any unused piece
+                if best_piece is None:
+                    best_piece = [p for p in range(num_pieces) if p not in used][0]
                 grid[r][c] = best_piece
                 used.add(best_piece)
+
         return grid
+
+    # --- Evaluate grid ---
+    def evaluate_grid_quality(self, grid, all_comparisons, N):
+        total_score, match_count = 0,0
+        edge_lookup = {(c['piece1'], c['piece2'], c['edge1']): c['score'] for c in all_comparisons}
+        for r in range(N):
+            for c in range(N):
+                piece = grid[r][c]
+                if c < N-1:
+                    right_piece = grid[r][c+1]
+                    total_score += edge_lookup.get((piece, right_piece, 'right'), 0)
+                    match_count +=1
+                if r < N-1:
+                    bottom_piece = grid[r+1][c]
+                    total_score += edge_lookup.get((piece, bottom_piece, 'bottom'), 0)
+                    match_count +=1
+        return total_score/match_count if match_count>0 else 0.0
 
     # --- Try multiple starting pieces ---
     def try_different_starting_pieces(self, top_horizontal, top_vertical, all_comparisons, N):
         num_pieces = N*N
         best_grid, best_score = None, 0
-        for start in range(min(4,num_pieces)):
-            grid=[[None]*N for _ in range(N)]
-            used=set()
-            grid[0][0]=start
+        for start in range(min(8,num_pieces)):
+            grid = [[None]*N for _ in range(N)]
+            used = set()
+            grid[0][0] = start
             used.add(start)
             for r in range(N):
                 for c in range(N):
                     if r==0 and c==0: continue
                     best_piece,best_score_local=None,-1
-                    fallback_piece,fallback_score=None,-1
+                    fallback_piece,fallback_score=-1,-1
                     for piece in range(num_pieces):
                         if piece in used: continue
                         score,matches_used=0,0
                         if c>0:
                             left_piece = grid[r][c-1]
                             for m in top_horizontal:
-                                if m['piece1']==left_piece and m['piece2']==piece: score+=m['score']; matches_used+=1; break
+                                if m['piece1']==left_piece and m['piece2']==piece:
+                                    score+=m['score']; matches_used+=1; break
                         if r>0:
                             top_piece = grid[r-1][c]
                             for m in top_vertical:
-                                if m['piece1']==top_piece and m['piece2']==piece: score+=m['score']; matches_used+=1; break
-                        required=(1 if c>0 else 0)+(1 if r>0 else 0)
+                                if m['piece1']==top_piece and m['piece2']==piece:
+                                    score+=m['score']; matches_used+=1; break
+                        required = (c>0) + (r>0)
                         if score>fallback_score: fallback_score=score; fallback_piece=piece
                         if matches_used<required: continue
                         if matches_used==2: score*=1.2
@@ -191,36 +203,41 @@ class DescriptorBasedAssembler:
                     if best_piece is None: best_piece=fallback_piece
                     grid[r][c]=best_piece
                     used.add(best_piece)
-            score=self.evaluate_grid_quality(grid, all_comparisons, N)
-            if score>best_score: best_score=score; best_grid=[row[:] for row in grid]
+            score = self.evaluate_grid_quality(grid, all_comparisons, N)
+            if score > best_score:
+                best_score = score
+                best_grid = [row[:] for row in grid]
         return best_grid, best_score
 
     # --- Main solver ---
     def solve(self, all_pieces):
-        num_pieces=len(all_pieces)
-        N=int(np.sqrt(num_pieces))
+        num_pieces = len(all_pieces)
+        N = int(np.sqrt(num_pieces))
         print(f"🤖 Solver: Grid {N}x{N}, Pieces {num_pieces}")
 
-        all_comparisons, all_descriptors=self.compute_all_comparisons(all_pieces)
+        all_comparisons, all_descriptors = self.compute_all_comparisons(all_pieces)
         print(f"   {len(all_comparisons)} edge comparisons generated")
 
+        # Mutual best buddies + top scoring
         mutual_matches = mutual_best_buddies(all_comparisons)
-        filtered = mutual_matches + sorted(all_comparisons, key=lambda x:x['score'], reverse=True)[:50]
+        filtered = mutual_matches + sorted(all_comparisons, key=lambda x:x['score'], reverse=self.top_k_matches)
 
         top_horizontal, top_vertical = self.get_top_matches_by_type(filtered)
 
-        # Strategy: multiple starting pieces
-        best_grid, best_score=self.try_different_starting_pieces(top_horizontal, top_vertical, all_comparisons, N)
-        if best_grid is None or best_score<0.3:
-            best_grid=self.build_grid_from_top_matches(top_horizontal, top_vertical, N)
-            best_score=self.evaluate_grid_quality(best_grid, all_comparisons, N)
+        best_grid, best_score = self.try_different_starting_pieces(top_horizontal, top_vertical, all_comparisons, N)
+        if best_grid is None or best_score < 0.3:
+            best_grid = self.build_grid_from_top_matches(top_horizontal, top_vertical, N)
+            best_score = self.evaluate_grid_quality(best_grid, all_comparisons, N)
+
+        # Add missing outputs to match expected 5 values
+        all_piece_rotations = [{'0': all_pieces[i]} for i in range(num_pieces)]
+        best_buddies = sorted(all_comparisons, key=lambda x:x['score'], reverse=True)[:20]
 
         print(f"✅ Final assembly score: {best_score:.3f}")
 
-        all_piece_rotations=[{'0': all_pieces[i]} for i in range(num_pieces)]
-        best_buddies=sorted(all_comparisons, key=lambda x:x['score'], reverse=True)[:20]
-
+        # Return 5 values
         return all_comparisons, all_piece_rotations, best_grid, best_buddies, best_score
+
 
 
 # --- Mutual best buddies ---
@@ -228,7 +245,8 @@ def mutual_best_buddies(matches):
     best_for = {}
     for m in matches:
         key=(m['piece1'],m['edge1'])
-        if key not in best_for or m['score']>best_for[key]['score']: best_for[key]=m
+        if key not in best_for or m['score']>best_for[key]['score']:
+            best_for[key]=m
     mutual=[]
     seen=set()
     for m in best_for.values():
@@ -237,5 +255,7 @@ def mutual_best_buddies(matches):
             rev=best_for[rev_key]
             if rev['piece2']==m['piece1'] and rev['edge2']==m['edge1']:
                 pair_id=tuple(sorted([(m['piece1'],m['edge1']),(m['piece2'],m['edge2'])]))
-                if pair_id not in seen: mutual.append(m); seen.add(pair_id)
+                if pair_id not in seen:
+                    mutual.append(m)
+                    seen.add(pair_id)
     return mutual

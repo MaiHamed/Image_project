@@ -187,4 +187,3 @@ def get_rotation_from_rotations_dict(rotations_dict):
     
     # Default: no rotation
     return 0
-

@@ -429,3 +429,51 @@ def visualize_edge_compatibility(pieces, grid, N, all_comparisons, ax):
     sm.set_array([])
     plt.colorbar(sm, ax=ax, fraction=0.046, pad=0.04, label='Edge Compatibility')
     
+def visualize_descriptor_result(assembled_image, puzzle_id, N, assembly_score, show=True, save_path=None):
+    """
+    Visualize the descriptor-based assembly result with score and quality.
+    Optionally save the image to disk.
+
+    Parameters:
+        assembled_image (np.ndarray): The assembled puzzle image
+        puzzle_id (str or int): Puzzle identifier
+        N (int): Grid size (NxN)
+        assembly_score (float): Assembly score (0-1)
+        show (bool): Whether to display the image with matplotlib
+        save_path (str): If provided, save the image to this path
+    """
+    if assembled_image is None:
+        print("   ⚠️ No assembled image to visualize")
+        return
+
+    # Color code quality
+    if assembly_score > 0.3:
+        color, quality = "green", "Excellent"
+    elif assembly_score > 0.2:
+        color, quality = "orange", "Good"
+    elif assembly_score > 0.1:
+        color, quality = "yellow", "Fair"
+    else:
+        color, quality = "red", "Poor"
+
+    if show:
+        plt.figure(figsize=(8, 8))
+        plt.imshow(cv2.cvtColor(assembled_image, cv2.COLOR_BGR2RGB))
+        plt.title(
+            f"Descriptor Algorithm - Puzzle {puzzle_id} ({N}x{N})\n"
+            f"Score: {assembly_score:.3f} | Quality: {quality}",
+            fontsize=14, fontweight='bold', color=color
+        )
+        plt.axis('off')
+        plt.figtext(
+            0.5, 0.02,
+            f"Assembly Score: {assembly_score:.3f}",
+            ha='center', fontsize=10,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor="lightblue", alpha=0.8)
+        )
+        plt.tight_layout()
+        plt.show()
+
+    if save_path:
+        cv2.imwrite(save_path, assembled_image)
+        print(f"   💾 Descriptor result saved to: {save_path}")
