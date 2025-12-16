@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import itertools
 
 class DescriptorBasedAssembler:
     """
@@ -104,7 +105,39 @@ class DescriptorBasedAssembler:
         vertical.sort(key=lambda x:x['score'], reverse=True)
         return horizontal[:self.top_k_matches], vertical[:self.top_k_matches]
 
-    # --- Build grid from top matches ---
+    # --- Exact brute-force solver for 2x2 ---
+    def solve_2x2_bruteforce(self, all_pieces):
+        assert len(all_pieces) == 4, "2x2 brute force requires exactly 4 pieces"
+
+        # Compute descriptors once
+        all_comparisons, _ = self.compute_all_comparisons(all_pieces)
+
+        # Build fast lookup: (p1, p2, edge) → score
+        edge_score = {}
+        for c in all_comparisons:
+            edge_score[(c['piece1'], c['piece2'], c['edge1'])] = c['score']
+
+        best_score = -1
+        best_grid = None
+
+        # Try all permutations of 4 pieces
+        for perm in itertools.permutations(range(4)):
+            A, B, C, D = perm
+
+            score = 0.0
+            score += edge_score.get((A, B, 'right'), 0)
+            score += edge_score.get((A, C, 'bottom'), 0)
+            score += edge_score.get((B, D, 'bottom'), 0)
+            score += edge_score.get((C, D, 'right'), 0)
+
+            if score > best_score:
+                best_score = score
+                best_grid = [[A, B],
+                             [C, D]]
+
+        return best_grid, best_score
+
+    # --- Build grid from top matches (fallback for larger puzzles) ---
     def build_grid_from_top_matches(self, top_horizontal, top_vertical, N):
         num_pieces = N * N
         grid = [[None] * N for _ in range(N)]
@@ -168,94 +201,33 @@ class DescriptorBasedAssembler:
                     match_count +=1
         return total_score/match_count if match_count>0 else 0.0
 
-    # --- Try multiple starting pieces ---
-    def try_different_starting_pieces(self, top_horizontal, top_vertical, all_comparisons, N):
-        num_pieces = N*N
-        best_grid, best_score = None, 0
-        for start in range(min(8,num_pieces)):
-            grid = [[None]*N for _ in range(N)]
-            used = set()
-            grid[0][0] = start
-            used.add(start)
-            for r in range(N):
-                for c in range(N):
-                    if r==0 and c==0: continue
-                    best_piece,best_score_local=None,-1
-                    fallback_piece,fallback_score=-1,-1
-                    for piece in range(num_pieces):
-                        if piece in used: continue
-                        score,matches_used=0,0
-                        if c>0:
-                            left_piece = grid[r][c-1]
-                            for m in top_horizontal:
-                                if m['piece1']==left_piece and m['piece2']==piece:
-                                    score+=m['score']; matches_used+=1; break
-                        if r>0:
-                            top_piece = grid[r-1][c]
-                            for m in top_vertical:
-                                if m['piece1']==top_piece and m['piece2']==piece:
-                                    score+=m['score']; matches_used+=1; break
-                        required = (c>0) + (r>0)
-                        if score>fallback_score: fallback_score=score; fallback_piece=piece
-                        if matches_used<required: continue
-                        if matches_used==2: score*=1.2
-                        if score>best_score_local: best_score_local=score; best_piece=piece
-                    if best_piece is None: best_piece=fallback_piece
-                    grid[r][c]=best_piece
-                    used.add(best_piece)
-            score = self.evaluate_grid_quality(grid, all_comparisons, N)
-            if score > best_score:
-                best_score = score
-                best_grid = [row[:] for row in grid]
-        return best_grid, best_score
-
     # --- Main solver ---
     def solve(self, all_pieces):
         num_pieces = len(all_pieces)
         N = int(np.sqrt(num_pieces))
         print(f"🤖 Solver: Grid {N}x{N}, Pieces {num_pieces}")
 
+        # --- Use exact brute force for 2x2 ---
+        if N == 2:
+            best_grid, best_score = self.solve_2x2_bruteforce(all_pieces)
+            all_comparisons, _ = self.compute_all_comparisons(all_pieces)
+            all_piece_rotations = [{'0': all_pieces[i]} for i in range(num_pieces)]
+            best_buddies = sorted(all_comparisons, key=lambda x:x['score'], reverse=True)[:20]
+            print(f"✅ Exact 2x2 brute-force score: {best_score:.3f}")
+            return all_comparisons, all_piece_rotations, best_grid, best_buddies, best_score
+
+        # --- Standard solver for larger puzzles ---
         all_comparisons, all_descriptors = self.compute_all_comparisons(all_pieces)
         print(f"   {len(all_comparisons)} edge comparisons generated")
 
-        # Mutual best buddies + top scoring
-        mutual_matches = mutual_best_buddies(all_comparisons)
-        filtered = mutual_matches + sorted(all_comparisons, key=lambda x:x['score'], reverse=self.top_k_matches)
+        top_horizontal, top_vertical = self.get_top_matches_by_type(all_comparisons)
 
-        top_horizontal, top_vertical = self.get_top_matches_by_type(filtered)
+        best_grid = self.build_grid_from_top_matches(top_horizontal, top_vertical, N)
+        best_score = self.evaluate_grid_quality(best_grid, all_comparisons, N)
 
-        best_grid, best_score = self.try_different_starting_pieces(top_horizontal, top_vertical, all_comparisons, N)
-        if best_grid is None or best_score < 0.3:
-            best_grid = self.build_grid_from_top_matches(top_horizontal, top_vertical, N)
-            best_score = self.evaluate_grid_quality(best_grid, all_comparisons, N)
-
-        # Add missing outputs to match expected 5 values
         all_piece_rotations = [{'0': all_pieces[i]} for i in range(num_pieces)]
         best_buddies = sorted(all_comparisons, key=lambda x:x['score'], reverse=True)[:20]
 
         print(f"✅ Final assembly score: {best_score:.3f}")
 
-        # Return 5 values
         return all_comparisons, all_piece_rotations, best_grid, best_buddies, best_score
-
-
-
-# --- Mutual best buddies ---
-def mutual_best_buddies(matches):
-    best_for = {}
-    for m in matches:
-        key=(m['piece1'],m['edge1'])
-        if key not in best_for or m['score']>best_for[key]['score']:
-            best_for[key]=m
-    mutual=[]
-    seen=set()
-    for m in best_for.values():
-        rev_key=(m['piece2'],m['edge2'])
-        if rev_key in best_for:
-            rev=best_for[rev_key]
-            if rev['piece2']==m['piece1'] and rev['edge2']==m['edge1']:
-                pair_id=tuple(sorted([(m['piece1'],m['edge1']),(m['piece2'],m['edge2'])]))
-                if pair_id not in seen:
-                    mutual.append(m)
-                    seen.add(pair_id)
-    return mutual
