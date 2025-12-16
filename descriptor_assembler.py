@@ -1,7 +1,5 @@
 import cv2
 import numpy as np
-from descriptor import describe_edge_color_pattern, extract_rectangular_edges, compute_edge_compatibility
-
 
 class DescriptorBasedAssembler:
     """
@@ -11,74 +9,78 @@ class DescriptorBasedAssembler:
     def __init__(self, border_width=10, descriptor_length=100):
         self.border_width = border_width
         self.descriptor_length = descriptor_length
-    
+    # you are  the issue
     def describe_edge_color_pattern(self, edge_pixels):
-        """Effective edge descriptor using gradient information"""
         if edge_pixels is None or len(edge_pixels) == 0:
-            return np.zeros(self.descriptor_length)
-        
-        # Convert to grayscale for simplicity
-        if len(edge_pixels.shape) == 3:  # Color image
-            gray = cv2.cvtColor(edge_pixels, cv2.COLOR_BGR2GRAY)
+            return np.full(self.descriptor_length, 0.5, dtype=np.float32)
+
+        gray = cv2.cvtColor(edge_pixels, cv2.COLOR_BGR2GRAY) if edge_pixels.ndim == 3 else edge_pixels
+        h, w = gray.shape
+
+        # --- Code1: middle row/column ---
+        profile1 = gray[:, w//2].astype(np.float32) if h > w else gray[h//2, :].astype(np.float32)
+
+        # --- Code2: row+column average ---
+        row_profile = gray[h//2, :].astype(np.float32)
+        col_profile = gray[:, w//2].astype(np.float32)
+        if len(row_profile) == len(col_profile):
+            profile2 = (row_profile + col_profile[:len(row_profile)]) / 2.0
         else:
-            gray = edge_pixels
-        
-        # Get edge profile
-        if len(gray.shape) == 2:
-            # Take middle row/column for edge profile
-            if gray.shape[0] > gray.shape[1]:
-                # Vertical edge (left/right)
-                profile = gray[:, gray.shape[1]//2].astype(np.float32)
-            else:
-                # Horizontal edge (top/bottom)
-                profile = gray[gray.shape[0]//2, :].astype(np.float32)
-        else:
-            profile = gray.flatten().astype(np.float32)
-        
-        if len(profile) < 5:
-            return np.zeros(self.descriptor_length)
-        
-        # Apply smoothing
-        profile_smooth = cv2.GaussianBlur(profile.reshape(-1, 1), (3, 1), 1.0).flatten()
-        
-        # Calculate gradient (edge changes)
-        if len(profile_smooth) > 1:
-            gradient = np.gradient(profile_smooth)
-        else:
-            gradient = np.zeros_like(profile_smooth)
-        
-        # Combine profile and gradient
+            profile2 = row_profile
+
+        # --- Resample to same length ---
+        target_len = max(len(profile1), len(profile2))
+        x1 = np.linspace(0, 1, len(profile1))
+        x2 = np.linspace(0, 1, len(profile2))
+        x_new = np.linspace(0, 1, target_len)
+        profile1_resampled = np.interp(x_new, x1, profile1)
+        profile2_resampled = np.interp(x_new, x2, profile2)
+
+        # --- Adaptive weighting based on standard deviation ---
+        std1 = np.std(profile1_resampled)
+        weight1 = min(0.75, max(0.35, 0.5 + 0.5 * (std1 / np.max([std1, 5]))))
+        weight2 = 1.0 - weight1
+        profile = weight1 * profile1_resampled + weight2 * profile2_resampled
+
+        # --- Smooth and compute gradient ---
+        profile_smooth = cv2.GaussianBlur(profile.reshape(-1,1), (3,1), 1.0).flatten()
+        gradient = np.gradient(profile_smooth)
+        if np.all(gradient == 0):
+            gradient += 1e-12
+
+        # --- Normalize and combine ---
         profile_norm = (profile_smooth - profile_smooth.min()) / (profile_smooth.max() - profile_smooth.min() + 1e-10)
         gradient_norm = (gradient - gradient.min()) / (gradient.max() - gradient.min() + 1e-10)
         combined = 0.6 * profile_norm + 0.4 * gradient_norm
-        
-        # Resize to target length
-        if len(combined) > 1:
-            x_old = np.linspace(0, 1, len(combined))
-            x_new = np.linspace(0, 1, self.descriptor_length)
-            descriptor = np.interp(x_new, x_old, combined)
-        else:
-            descriptor = np.zeros(self.descriptor_length)
-        
-        # Normalize to [0.1, 0.9] range
-        descriptor_min, descriptor_max = descriptor.min(), descriptor.max()
-        if descriptor_max > descriptor_min:
-            descriptor = 0.1 + 0.8 * (descriptor - descriptor_min) / (descriptor_max - descriptor_min)
-        else:
-            descriptor = np.full_like(descriptor, 0.5)
-        
-        return descriptor
 
+        # --- Interpolate to descriptor length ---
+        x_old = np.linspace(0, 1, len(combined))
+        x_new_final = np.linspace(0, 1, self.descriptor_length)
+        descriptor = np.interp(x_new_final, x_old, combined)
 
+        # --- Normalize to [0.1, 0.9] ---
+        min_d, max_d = descriptor.min(), descriptor.max()
+        if max_d - min_d > 1e-10:
+            descriptor = 0.1 + 0.8 * (descriptor - min_d) / (max_d - min_d)
+        else:
+            descriptor.fill(0.5)
+
+        return descriptor.astype(np.float32)
+
+    # you are not the issue
     def extract_rectangular_edges(self, piece_img):
-        """Extract border regions with better edge focus"""
+        """
+        Extract border regions with better edge focus.
+        Ensures edges are large enough even for small pieces.
+        """
         if piece_img is None:
             return {}
-        
+
         h, w = piece_img.shape[:2]
-        bw = min(self.border_width, h // 4, w // 4)
-        bw = max(bw, 3)
-        
+
+        # Compute border width dynamically
+        bw = max(min(self.border_width, h // 2, w // 2), 5)  # at least 5 pixels
+
         if len(piece_img.shape) == 3:
             return {
                 'top': piece_img[:bw, :, :].copy(),
@@ -93,22 +95,19 @@ class DescriptorBasedAssembler:
                 'left': piece_img[:, :bw].copy(),
                 'right': piece_img[:, -bw:].copy()
             }
-
-
+   
     def compute_edge_similarity(self, desc1, desc2):
         if len(desc1) == 0 or len(desc2) == 0:
             return 0.0
 
         desc1_norm = desc1 - desc1.mean()
         desc2_norm = desc2 - desc2.mean()
-        denom = np.sqrt(np.sum(desc1_norm**2) * np.sum(desc2_norm**2)) + 1e-10
+        denom = np.sqrt(np.sum(desc1_norm**2) * np.sum(desc2_norm**2))
+        if denom < 1e-4:  # small floor
+            return 1.0       # treat almost flat edges as perfectly matching
         ncc = np.sum(desc1_norm * desc2_norm) / denom
-        score = max(0.0, min(1.0, ncc))
-        return score
-    
+        return max(0.0, min(1.0, ncc))
 
-
-    
     def compute_all_comparisons(self, all_pieces):
         """
         Compute all pairwise edge comparisons with proper edge pairing
@@ -154,7 +153,7 @@ class DescriptorBasedAssembler:
                     })
         
         return all_comparisons, all_descriptors
-    
+    # you are a problem
     def get_top_matches_by_type(self, all_comparisons, num_pieces):
         """
         Get top matches for each edge type
@@ -439,4 +438,3 @@ def mutual_best_buddies(matches):
                     seen.add(pair_id)
 
     return mutual
-

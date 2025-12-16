@@ -1,0 +1,7 @@
+Puzzle 6 (2x2) - Final Grid Layout
+Orientation: Left→Right
+Decision Method: paper_algorithm
+========================================
+
+Row  0:   0   1 
+Row  1:   3   2 
