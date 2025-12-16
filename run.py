@@ -20,10 +20,10 @@ def reconstruct_image(pieces, placement, grid_n):
         canvas[r*ph:(r+1)*ph, c*pw:(c+1)*pw] = pieces[pid]
 
     return canvas
-
 def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, puzzle_output_dir):
     """
-    Run descriptor algorithm with improved scoring
+    Run descriptor algorithm with improved scoring and save visualizations.
+    Saves outputs in organized subfolders: heatmaps, top_matches, best_assembled
     """
     print(f"\n🤖 DESCRIPTOR-BASED ALGORITHM")
     print("   Method: Enhanced edge descriptors with better discrimination")
@@ -36,17 +36,12 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
         'best_buddies': None,
         'assembly_score': 0,
         'assembled_image': None,
-        'save_path': None
+        'save_paths': {}
     }
     
     try:
-        # Initialize descriptor-based assembler
-        descriptor_assembler = DescriptorBasedAssembler(
-            border_width=8,
-            descriptor_length=100
-        )
-        
-        # Solve using descriptor-based algorithm
+        # Solve puzzle
+        descriptor_assembler = DescriptorBasedAssembler(border_width=8, descriptor_length=100)
         all_comparisons, all_piece_rotations, final_grid, best_buddies, assembly_score = \
             descriptor_assembler.solve(all_piece_images)
         
@@ -60,48 +55,58 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
         
         print(f"✅ Descriptor Algorithm analysis completed (Score: {assembly_score:.3f})")
         
-        # =====================================
-        # VISUALIZE ALL COMPARISONS (Heatmap)
-        # =====================================
-        #if all_comparisons:
-            #print(f"\n📊 Visualizing all descriptor matches (Heatmap)")
-            #try:
-                #horizontal_scores, vertical_scores = visualize_comparison_heatmap(
-                    #all_comparisons, all_piece_images, N, f"Descriptor Algorithm - Puzzle {puzzle_id}"
-                #)
-            #except Exception as e:
-                #print(f"   ⚠️ Heatmap visualization failed: {e}")
+        # --- Create organized subfolders ---
+        heatmap_dir = os.path.join(puzzle_output_dir, "heatmaps")
+        matches_dir = os.path.join(puzzle_output_dir, "top_matches")
+        assembled_dir = os.path.join(puzzle_output_dir, "best_assembled")
+        for d in [heatmap_dir, matches_dir, assembled_dir]:
+            os.makedirs(d, exist_ok=True)
         
-        # =====================================
-        # VISUALIZE TOP 3 MATCHES
-        # =====================================
-        #if all_comparisons:
-            #print(f"\n🔗 Visualizing top 3 descriptor matches")
-            #try:
-                #visualize_matches_with_lines(all_piece_images, all_comparisons, top_n=3)
-            #except Exception as e:
-                #print(f"   ⚠️ Top matches visualization failed: {e}")
+        # --- Heatmap ---
+        if all_comparisons:
+            try:
+                heatmap_path = os.path.join(heatmap_dir, f"heatmap_{puzzle_id}.png")
+                # Let the function create the figure and return it
+                fig, horizontal_scores, vertical_scores = visualize_comparison_heatmap(
+                    all_comparisons, all_piece_images, N, f"Puzzle {puzzle_id}"
+                )
+                fig.tight_layout()
+                fig.savefig(heatmap_path, dpi=200)
+                plt.close(fig)
+                results['save_paths']['heatmap'] = heatmap_path
+            except Exception as e:
+                print(f"   ⚠️ Heatmap visualization failed: {e}")
+
+        # --- Top matches ---
+        try:
+            match_line_path = os.path.join(matches_dir, f"top_matches_{puzzle_id}.png")
+            # Return figure from the function
+            fig = visualize_matches_with_lines(all_piece_images, all_comparisons, top_n=3)
+            fig.tight_layout()
+            fig.savefig(match_line_path, dpi=200)
+            plt.close(fig)
+            results['save_paths']['top_matches'] = match_line_path
+        except Exception as e:
+            print(f"   ⚠️ Top match visualization failed: {e}")
+
         
-        # =====================================
-        # ASSEMBLE FINAL GRID
-        # =====================================
+        # --- Assemble final grid ---
         if final_grid is not None:
             assembled_descriptor = assemble_grid_from_pieces(all_piece_images, final_grid, N=N)
             results['assembled_image'] = assembled_descriptor
             
-            # Visualize and optionally save
+            assembled_path = os.path.join(assembled_dir, f"descriptor_solved_{puzzle_id}.jpg")
             visualize_descriptor_result(
                 assembled_image=assembled_descriptor,
                 puzzle_id=puzzle_id,
                 N=N,
                 assembly_score=assembly_score,
-                show=False,  # Set False to disable plotting
-                save_path=os.path.join(puzzle_output_dir, f"descriptor_solved_{puzzle_id}.jpg")
+                show=False,   # Do not pop up window
+                save_path=assembled_path
             )
-            
+            results['save_paths']['assembled'] = assembled_path
             results['success'] = True
                 
-    
     except Exception as e:
         print(f"   ❌ Descriptor Algorithm failed: {e}")
         import traceback
@@ -298,13 +303,10 @@ def main():
                     puzzle_output_dir=descriptor_solved_dir
                 )
 
-                if descriptor_results['success'] and descriptor_results['assembled_image'] is not None:
-                    descriptor_img = descriptor_results['assembled_image']
-
-                    cv2.imwrite(
-                        os.path.join(descriptor_solved_dir, f"descriptor_solved_{filename}"),
-                        descriptor_img
-                    )
+                if descriptor_results['success']:
+                    print(f"   ✅ Puzzle {filename} solved!")
+                    for key, path in descriptor_results['save_paths'].items():
+                        print(f"      Saved {key}: {path}")
 
 
                 total_pieces_extracted += len(pieces)
