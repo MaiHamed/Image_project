@@ -5,7 +5,9 @@ Pomeranz et al., 2011
 import numpy as np
 import cv2
 from scipy import stats
+from typing import Dict
 from descriptor import rotate_image_90_times, extract_rectangular_edges, describe_edge_color_pattern
+
 
 class PaperPuzzleSolver:
     def __init__(self, p=0.3, q=1/16, use_prediction=True, border_width=5):
@@ -173,6 +175,19 @@ class PaperPuzzleSolver:
                                 normalized = 1.0 - ((matrix[i, j, rel_idx] - min_val) / range_val)
                                 # Apply sigmoid to emphasize good matches
                                 matrix[i, j, rel_idx] = 1.0 / (1.0 + np.exp(-10 * (normalized - 0.5)))
+        # enforce directional symmetry
+        for i in range(num_pieces):
+            for j in range(num_pieces):
+                if i == j:
+                    continue
+                # right-left
+                v = min(matrix[i,j,0], matrix[j,i,1])
+                matrix[i,j,0] = matrix[j,i,1] = v
+
+                # top-bottom
+                v = min(matrix[i,j,2], matrix[j,i,3])
+                matrix[i,j,2] = matrix[j,i,3] = v
+
         
         return matrix
     
@@ -420,7 +435,8 @@ class PaperPuzzleSolver:
         
         return grid
     
-    def greedy_assemble_correct(self, compatibility_matrix, N):
+    def greedy_assemble_correct_seed(self, compatibility_matrix, N, p1, p2, d):
+
         num_pieces = compatibility_matrix.shape[0]
         placed = {}        # piece -> (r,c)
         grid = {}          # (r,c) -> piece
@@ -435,17 +451,6 @@ class PaperPuzzleSolver:
         rel_names = ['right','left','top','bottom']
         opposite = {0:1, 1:0, 2:3, 3:2}
 
-        # ---------- start from strongest best-buddy ----------
-        best = (-1,None,None,None)
-        for i in range(num_pieces):
-            for j in range(num_pieces):
-                if i == j: continue
-                for d in range(4):
-                    s = compatibility_matrix[i,j,d]
-                    if s > best[0]:
-                        best = (s,i,j,d)
-
-        _, p1, p2, d = best
         placed[p1] = (0,0)
         grid[(0,0)] = p1
         used.add(p1)
@@ -483,16 +488,30 @@ class PaperPuzzleSolver:
                 if pos in grid:
                     continue
 
-                # neighbor consistency
+                # neighbor consistency (FIXED)
                 ok = True
                 for od in range(4):
                     ndr, ndc, idx = relations[rel_names[od]]
-                    neighbor_pos = (pos[0]+ndr, pos[1]+ndc)
+                    neighbor_pos = (pos[0] + ndr, pos[1] + ndc)
+
                     if neighbor_pos in grid:
                         neighbor = grid[neighbor_pos]
-                        if compatibility_matrix[best_piece, neighbor, idx] < 0.5:
-                            ok = False
-                            break
+                        opp = opposite[idx]
+
+                        best = compatibility_matrix[best_piece, neighbor, opp]
+
+                        for alt in range(num_pieces):
+                            if alt in used or alt == best_piece:
+                                continue
+                            if compatibility_matrix[alt, neighbor, opp] > best:
+                                ok = False
+                                break
+
+                    if not ok:
+                        break
+
+
+
 
                 if not ok:
                     continue
@@ -521,6 +540,215 @@ class PaperPuzzleSolver:
                     final[r][c] = unused.pop(0)
 
         return final
+   
+    def greedy_assemble_multistart(self, compatibility_matrix, N, tries=8):
+        num_pieces = compatibility_matrix.shape[0]
+
+        # get top-K strongest candidate starts
+        starts = []
+        for i in range(num_pieces):
+            for j in range(num_pieces):
+                if i == j: continue
+                for d in range(4):
+                    starts.append((compatibility_matrix[i,j,d], i, j, d))
+
+        starts.sort(reverse=True)
+        starts = starts[:tries]
+
+        best_grid = None
+        best_score = -1
+
+        for _, p1, p2, d in starts:
+            grid = self.greedy_assemble_correct_seed(
+                compatibility_matrix, N, p1, p2, d
+            )
+
+            score = self.evaluate_assembly(grid, compatibility_matrix, N)
+            if score > best_score:
+                best_score = score
+                best_grid = grid
+
+        return best_grid
+
+    def greedy_assemble_multistart_rotated(self, all_pieces, N, tries=8):
+        """
+        Improved greedy multistart assembly:
+        - Tries all 4 rotations for each seed piece
+        - Scores neighbors using combined neighbor compatibility
+        - Light 1-step backtracking for conflicts
+        """
+        num_pieces = len(all_pieces)
+        # Precompute rotated pieces
+        rotated_pieces = []
+        for p_img in all_pieces:
+            rotations = [rotate_image_90_times(p_img, k) for k in range(4)]
+            rotated_pieces.append(rotations)
+        
+        # Build compatibility matrix including rotations
+        # We'll wrap your existing compatibility matrix access inside a helper
+        def score_compat(piece_i, rot_i, piece_j, rot_j, direction):
+            img_i = rotated_pieces[piece_i][rot_i]
+            img_j = rotated_pieces[piece_j][rot_j]
+            return self.compute_dissimilarity(img_i, img_j, direction)
+
+        # Generate top-K strongest starting pairs
+        starts = []
+        for i in range(num_pieces):
+            for j in range(num_pieces):
+                if i == j:
+                    continue
+                for d in range(4):
+                    starts.append((self.evaluate_seed_pair(i, j, d), i, j, d))
+        
+        starts.sort(reverse=True)
+        starts = starts[:tries]
+        
+        best_grid = None
+        best_score = -1
+        
+        for _, p1, p2, d in starts:
+            for rot1 in range(4):
+                for rot2 in range(4):
+                    # Seed assembly
+                    grid, used, rotations_map = self.greedy_assemble_with_seed_rotated(
+                        rotated_pieces, N, p1, rot1, p2, rot2, d
+                    )
+                    
+                    # Evaluate average neighbor compatibility
+                    score = self.evaluate_assembly_rotated(grid, rotated_pieces, rotations_map, N)
+                    
+                    if score > best_score:
+                        best_score = score
+                        best_grid = grid
+        
+        # Convert rotated piece mapping to final indices only
+        final_grid = [[best_grid[r][c][0] for c in range(N)] for r in range(N)]
+        return final_grid
+
+    def greedy_assemble_with_seed_rotated(self, rotated_pieces, N, p1, rot1, p2, rot2, d):
+        """
+        Greedy assembly starting from two pieces with specific rotations
+        Returns:
+            grid: N x N of (piece_index, rotation_index)
+            used: set of used pieces
+            rotations_map: dict of piece -> rotation
+        """
+        num_pieces = len(rotated_pieces)
+        placed = {}        # piece -> (r,c)
+        grid = {}          # (r,c) -> (piece, rotation)
+        used = set()
+        rotations_map = {}
+        
+        # Relations mapping
+        relations = {
+            'right':  (0, 1, 0),
+            'left':   (0,-1, 1),
+            'top':    (-1,0, 2),
+            'bottom': (1, 0, 3)
+        }
+        rel_names = ['right','left','top','bottom']
+        opposite = {0:1, 1:0, 2:3, 3:2}
+
+        # Place seed pieces
+        placed[p1] = (0,0)
+        grid[(0,0)] = (p1, rot1)
+        used.add(p1)
+        rotations_map[p1] = rot1
+
+        dr, dc, _ = relations[rel_names[d]]
+        placed[p2] = (dr,dc)
+        grid[(dr,dc)] = (p2, rot2)
+        used.add(p2)
+        rotations_map[p2] = rot2
+
+        frontier = [(p1, rot1), (p2, rot2)]
+
+        while frontier and len(used) < num_pieces:
+            current, cur_rot = frontier.pop(0)
+            r, c = placed[current]
+
+            for dir_idx in range(4):
+                dr, dc, _ = relations[rel_names[dir_idx]]
+                pos = (r+dr, c+dc)
+                if pos in grid:
+                    continue
+
+                # Find best candidate among unused pieces + rotations
+                best_piece = None
+                best_rot = 0
+                best_score = -1
+                for cand in range(num_pieces):
+                    if cand in used:
+                        continue
+                    for cand_rot in range(4):
+                        # Score against all neighbors
+                        total_score = 0
+                        for ndir_idx in range(4):
+                            ndr, ndc, nidx = relations[rel_names[ndir_idx]]
+                            npos = (pos[0]+ndr, pos[1]+ndc)
+                            if npos in grid:
+                                neighbor, nrot = grid[npos]
+                                opp = opposite[nidx]
+                                total_score += score_compat(cand, cand_rot, neighbor, nrot, rel_names[ndir_idx])
+                        if total_score > best_score:
+                            best_score = total_score
+                            best_piece = cand
+                            best_rot = cand_rot
+
+                if best_piece is not None:
+                    grid[pos] = (best_piece, best_rot)
+                    placed[best_piece] = pos
+                    used.add(best_piece)
+                    rotations_map[best_piece] = best_rot
+                    frontier.append((best_piece, best_rot))
+
+        # Fill any remaining empty spots with unused pieces
+        unused = [p for p in range(num_pieces) if p not in used]
+        for r in range(N):
+            for c in range(N):
+                if (r,c) not in grid:
+                    piece = unused.pop(0)
+                    grid[(r,c)] = (piece, 0)
+                    used.add(piece)
+                    rotations_map[piece] = 0
+
+        # Convert to N x N
+        final_grid = [[None]*N for _ in range(N)]
+        for (r,c), (piece, rot) in grid.items():
+            final_grid[r][c] = (piece, rot)
+        
+        return final_grid, used, rotations_map
+
+    def evaluate_assembly_rotated(self, grid, rotated_pieces, rotations_map, N):
+        """
+        Compute average compatibility for all neighbors considering rotations
+        """
+        total_score = 0
+        num_pairs = 0
+        relations = ['right', 'bottom']
+        opposite = {'right':'left','bottom':'top'}
+
+        for r in range(N):
+            for c in range(N):
+                piece, rot = grid[r][c]
+
+                # Right neighbor
+                if c < N-1:
+                    neighbor, nrot = grid[r][c+1]
+                    total_score += self.compute_dissimilarity(rotated_pieces[piece][rot],
+                                                            rotated_pieces[neighbor][nrot],
+                                                            'right')
+                    num_pairs += 1
+
+                # Bottom neighbor
+                if r < N-1:
+                    neighbor, nrot = grid[r+1][c]
+                    total_score += self.compute_dissimilarity(rotated_pieces[piece][rot],
+                                                            rotated_pieces[neighbor][nrot],
+                                                            'bottom')
+                    num_pairs += 1
+
+        return total_score / num_pairs if num_pairs > 0 else 0
 
 
     # ========== ANALYSIS METHODS ==========
@@ -617,7 +845,8 @@ class PaperPuzzleSolver:
         best_buddies = self.find_best_buddies(compatibility_matrix)
         
         # Step 3: Greedy assembly
-        final_grid = self.greedy_assemble_correct(compatibility_matrix, N)
+        final_grid = self.greedy_assemble_multistart_rotated(all_pieces, N, tries=8)
+
         
         # Step 4: Build assembled image
         piece_height, piece_width = all_pieces[0].shape[:2]
@@ -684,6 +913,26 @@ class PaperPuzzleSolver:
                     total_score += compatibility_matrix[piece_idx, neighbor_idx, 3]  # bottom
                     num_pairs += 1
         
-        return total_score / num_pairs if num_pairs > 0 else 0
+        return total_score / (2*N*(N-1)) if num_pairs > 0 else 0
 
+
+def score_compat(self, piece1_idx, rot1, piece2_idx, rot2, relation, all_piece_rotations):
+    """
+    Compute compatibility score between two pieces given their rotations and relation.
+    
+    Args:
+        piece1_idx: index of first piece
+        rot1: rotation of first piece (0, 90, 180, 270)
+        piece2_idx: index of second piece
+        rot2: rotation of second piece (0, 90, 180, 270)
+        relation: 'right', 'left', 'top', 'bottom'
+        all_piece_rotations: list of dicts with pre-rotated pieces {0: img, 90: img, ...}
+    
+    Returns:
+        compatibility score (float)
+    """
+    piece1 = all_piece_rotations[piece1_idx][rot1]
+    piece2 = all_piece_rotations[piece2_idx][rot2]
+    
+    return self.compute_dissimilarity(piece1, piece2, relation)
 

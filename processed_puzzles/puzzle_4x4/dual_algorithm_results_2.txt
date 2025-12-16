@@ -6,7 +6,10 @@ PAPER ALGORITHM RESULTS:
   • Combined Score: 0.764
 
 DESCRIPTOR ALGORITHM RESULTS:
-  • Success: ✗
+  • Success: ✓
+  • Assembly Score: 0.101
+  • Total Comparisons: 960
+  • Saved to: /Users/maiab/Desktop/Image project/processed_puzzles/puzzle_4x4/descriptor_assembled_2.jpg
 
 COMPARISON:
-  • Only Paper Algorithm succeeded
+  • Winner: Paper Algorithm (by 0.663)
