@@ -7,6 +7,7 @@ import shutil
 from tkinter import Tk
 from tkinter.filedialog import askopenfilename
 from descriptor_assembler import DescriptorBasedAssembler
+from advanced_assember import AdvancedPuzzleSolver
 from functions import  assemble_grid_from_pieces, detect_grid_size, enhance_image, estimate_noise, extract_generic_grid_pieces, selective_median_filter
 from visualize import show_examples, visualize_generic_grid, visualize_orientation_comparison, visualize_comparison_heatmap, visualize_matches_with_lines, visualize_descriptor_result
 
