@@ -1,4 +1,4 @@
-# Square Jigsaw Puzzle Solver
+# Overview
 
 A comprehensive pipeline for solving **square jigsaw puzzles** using **computer vision** and **machine learning** techniques.
 The system implements **two complementary approaches**:
