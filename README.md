@@ -8,7 +8,7 @@ A comprehensive pipeline for solving **square jigsaw puzzles** using **computer 
 
 All approaches are enhanced with advanced preprocessing, robust matching strategies, and detailed visualization tools.
 
-##  Key Updates in Current Version
+##  Used Techniques and Technologies
 
 ### 1. **Intelligent Solver Selection**
 - **2×2 puzzles**: Uses `DescriptorBasedAssembler` with MSE-based edge comparison
