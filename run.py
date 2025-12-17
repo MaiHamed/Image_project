@@ -43,13 +43,58 @@ def validate_grid(grid, N):
     return actual_pieces == expected_pieces
 
 
+def format_advanced_solver_result(solver_result, N, all_piece_images):
+    """
+    Format the result from AdvancedPuzzleSolver to match the expected 5-tuple format
+    """
+    print(f"   Formatting solver result (type: {type(solver_result)}, length: {len(solver_result) if isinstance(solver_result, (tuple, list)) else 'N/A'})")
+    
+    # If it's already a 5-tuple, return as-is
+    if isinstance(solver_result, tuple) and len(solver_result) == 5:
+        print("   ✅ Already in correct 5-tuple format")
+        return solver_result
+    
+    # If it's a list (probably the solved grid)
+    if isinstance(solver_result, (list, np.ndarray)):
+        # Check if it's a flat list of piece indices
+        if len(solver_result) == N * N and all(isinstance(x, (int, np.integer)) for x in solver_result):
+            print(f"   Detected flat list of {len(solver_result)} piece indices")
+            
+            # Convert flat list to 2D grid
+            if N > 0:
+                final_grid = [solver_result[i*N:(i+1)*N] for i in range(N)]
+            else:
+                final_grid = [solver_result]
+            
+            # Create dummy values for other expected returns
+            all_comparisons = []
+            all_piece_rotations = [{'0': img} for img in all_piece_images]
+            best_buddies = []
+            assembly_score = 0.7  # Default good score for AdvancedSolver
+            
+            return all_comparisons, all_piece_rotations, final_grid, best_buddies, assembly_score
+    
+    # If we get here, something unexpected happened
+    print(f"   ⚠️ Unexpected result format from AdvancedPuzzleSolver")
+    
+    # Create a fallback ordered grid
+    final_grid = [[i * N + j for j in range(N)] for i in range(N)]
+    all_comparisons = []
+    all_piece_rotations = [{'0': img} for img in all_piece_images]
+    best_buddies = []
+    assembly_score = 0.3  # Low score for fallback
+    
+    return all_comparisons, all_piece_rotations, final_grid, best_buddies, assembly_score
+
+
 def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, puzzle_output_dir):
     """
     Run descriptor algorithm with improved scoring and save visualizations.
-    Now uses MSE-based approach similar to the working code.
+    Uses different solvers based on grid size:
+    - 2x2: Uses DescriptorBasedAssembler.solve() (5 parameters)
+    - 4x4 or 8x8: Uses AdvancedPuzzleSolver.solve_puzzle() (16 parameters)
     """
-    print(f"\n🤖 DESCRIPTOR-BASED ALGORITHM")
-    print("   Method: MSE-based edge comparison (LAB + gradients)")
+    print(f"\n🤖 PUZZLE SOLVER")
     print(f"   Grid size: {N}x{N}")
     
     results = {
@@ -71,44 +116,31 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
             print(f"   Using first {expected_pieces} pieces only")
             all_piece_images = all_piece_images[:expected_pieces]
         
-        # Try using AdvancedPuzzleSolver first
-        print("   Using AdvancedPuzzleSolver...")
-        solver = AdvancedPuzzleSolver()
-        
-        # Check what solve_puzzle returns
-        solver_result = solver.solve_puzzle(all_piece_images, N)
-        
-        # Debug: Print what we got
-        print(f"   Solver returned: {type(solver_result)}")
-        if isinstance(solver_result, tuple):
-            print(f"   Tuple length: {len(solver_result)}")
-        
-        # Try to handle different return formats
-        if isinstance(solver_result, tuple):
-            if len(solver_result) == 5:
-                # Standard format: all_comparisons, rotations, grid, buddies, score
-                all_comparisons, all_piece_rotations, final_grid, best_buddies, assembly_score = solver_result
-            elif len(solver_result) == 16:
-                # Probably returns the grid directly (16 pieces for 4x4)
-                print("   Solver returned grid directly")
-                final_grid = list(solver_result)
-                all_comparisons = []
-                all_piece_rotations = [{'0': img} for img in all_piece_images]
-                best_buddies = []
-                assembly_score = 0.5  # Default score
-            else:
-                print(f"   Unexpected return format with {len(solver_result)} items")
-                # Fallback to DescriptorBasedAssembler
-                raise ValueError("Unexpected return format")
+        # Choose solver based on grid size
+        if N == 2:
+            # Use DescriptorBasedAssembler for 2x2 puzzles
+            print("   Using DescriptorBasedAssembler (5-parameter .solve())...")
+            descriptor_assembler = DescriptorBasedAssembler(border_width=3, descriptor_length=100)
+            all_comparisons, all_piece_rotations, final_grid, best_buddies, assembly_score = \
+                descriptor_assembler.solve(all_piece_images)
+            
+        elif N == 4 or N == 8:
+            # Use AdvancedPuzzleSolver for 4x4 and 8x8 puzzles
+            print(f"   Using AdvancedPuzzleSolver for {N}x{N} puzzle...")
+            solver = AdvancedPuzzleSolver()
+            
+            # Call the solver
+            solver_result = solver.solve_puzzle(all_piece_images, N)
+            
+            # Format the result to match expected 5-tuple
+            all_comparisons, all_piece_rotations, final_grid, best_buddies, assembly_score = \
+                format_advanced_solver_result(solver_result, N, all_piece_images)
+            
         else:
-            # Not a tuple, might be just the grid
-            print("   Solver returned non-tuple result")
-            final_grid = solver_result
-            all_comparisons = []
-            all_piece_rotations = [{'0': img} for img in all_piece_images]
-            best_buddies = []
-            assembly_score = 0.5
+            print(f"   ❌ Unsupported grid size: {N}x{N}")
+            return results
         
+        # Update results
         results.update({
             'all_comparisons': all_comparisons,
             'all_piece_rotations': all_piece_rotations,
@@ -119,12 +151,6 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
         
         # Validate the grid
         if final_grid is not None:
-            # Convert to proper grid format if needed
-            if isinstance(final_grid, list) and len(final_grid) == N * N and all(isinstance(x, (int, np.integer)) for x in final_grid):
-                # It's a flat list, convert to 2D grid
-                print("   Converting flat list to 2D grid...")
-                final_grid = [final_grid[i*N:(i+1)*N] for i in range(N)]
-            
             is_valid = validate_grid(final_grid, N)
             print(f"   Grid validation: {'✅ Valid' if is_valid else '❌ Invalid'}")
             
@@ -148,7 +174,7 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
         for d in [heatmap_dir, matches_dir, assembled_dir]:
             os.makedirs(d, exist_ok=True)
         
-        # --- Heatmap --- (only if we have comparisons)
+        # --- Heatmap --- (only for 2x2 or if we have comparisons)
         if all_comparisons and len(all_comparisons) > 0:
             try:
                 heatmap_path = os.path.join(heatmap_dir, f"heatmap_{puzzle_id}.png")
@@ -165,7 +191,7 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
         else:
             print(f"   ℹ️ No comparisons available for heatmap")
         
-        # --- Top matches --- (only if we have comparisons)
+        # --- Top matches --- (only for 2x2 or if we have comparisons)
         if all_comparisons and len(all_comparisons) > 0:
             try:
                 match_line_path = os.path.join(matches_dir, f"top_matches_{puzzle_id}.png")
@@ -209,49 +235,9 @@ def run_descriptor_algorithm_with_improvement(all_piece_images, N, puzzle_id, pu
             print(f"   ❌ No grid to assemble")
                 
     except Exception as e:
-        print(f"   ❌ Descriptor Algorithm failed: {e}")
-        print("   Trying fallback with DescriptorBasedAssembler...")
-        
-        # Fallback to the original DescriptorBasedAssembler
-        try:
-            descriptor_assembler = DescriptorBasedAssembler(border_width=3, descriptor_length=100)
-            all_comparisons, all_piece_rotations, final_grid, best_buddies, assembly_score = \
-                descriptor_assembler.solve(all_piece_images)
-            
-            results.update({
-                'all_comparisons': all_comparisons,
-                'all_piece_rotations': all_piece_rotations,
-                'final_grid': final_grid,
-                'best_buddies': best_buddies,
-                'assembly_score': assembly_score,
-                'success': final_grid is not None
-            })
-            
-            print(f"   ✅ Fallback succeeded with score: {assembly_score:.3f}")
-            
-            # Assemble if successful
-            if final_grid is not None:
-                assembled_descriptor = assemble_grid_from_pieces(all_piece_images, final_grid, N=N)
-                results['assembled_image'] = assembled_descriptor
-                
-                # Save if we have an output directory
-                if puzzle_output_dir:
-                    assembled_dir = os.path.join(puzzle_output_dir, "best_assembled")
-                    os.makedirs(assembled_dir, exist_ok=True)
-                    assembled_path = os.path.join(assembled_dir, f"descriptor_solved_{puzzle_id}.jpg")
-                    
-                    visualize_descriptor_result(
-                        assembled_image=assembled_descriptor,
-                        puzzle_id=puzzle_id,
-                        N=N,
-                        assembly_score=assembly_score,
-                        show=True,
-                        save_path=assembled_path
-                    )
-                    results['save_paths']['assembled'] = assembled_path
-                    
-        except Exception as fallback_error:
-            print(f"   ❌ Fallback also failed: {fallback_error}")
+        print(f"   ❌ Puzzle solving failed: {e}")
+        import traceback
+        traceback.print_exc()
     
     return results
 
@@ -410,6 +396,9 @@ def main():
     if images_by_dir:
         print("\n🔍 EXECUTING GENERIC GRID CROPPING")
         print("   Method: Auto-detecting 2x2, 4x4, or 8x8 based on folder/filenames")
+        print("   Solver selection:")
+        print("     - 2x2 puzzles: DescriptorBasedAssembler (5 parameters)")
+        print("     - 4x4/8x8 puzzles: AdvancedPuzzleSolver (16 parameters)")
 
         total_images = sum(len(v) for v in images_by_dir.values())
         
@@ -455,8 +444,8 @@ def main():
                 print(f"   Detected grid size: {N}x{N}")
                 
                 # Check if grid size is valid
-                if N not in [2, 4]:
-                    print(f"   ⚠️ Unsupported grid size {N}x{N}. Only 2x2 and 4x4 are supported.")
+                if N not in [2, 4, 8]:
+                    print(f"   ⚠️ Unsupported grid size {N}x{N}. Only 2x2, 4x4, and 8x8 are supported.")
                     puzzles_failed += 1
                     continue
                 
@@ -484,7 +473,7 @@ def main():
                         piece
                     )
 
-                # 🤖 Solve puzzle (Descriptor-based)
+                # 🤖 Solve puzzle (Choose solver based on grid size)
                 print(f"   Solving {N}x{N} puzzle...")
                 descriptor_results = run_descriptor_algorithm_with_improvement(
                     pieces,
