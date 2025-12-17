@@ -1,0 +1,11 @@
+Puzzle: 0
+Grid size: 4x4
+Assembly score: 0.700
+Unique pieces: 16/16
+Grid:
+  Row 0: [10, 5, 12, 0]
+  Row 1: [11, 9, 14, 13]
+  Row 2: [4, 7, 1, 2]
+  Row 3: [8, 15, 3, 6]
+
+Solver used: AdvancedPuzzleSolver

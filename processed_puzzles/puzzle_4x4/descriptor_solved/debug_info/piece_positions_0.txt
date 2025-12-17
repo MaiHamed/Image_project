@@ -1,0 +1,20 @@
+Piece positions in final grid:
+Puzzle: 0, Grid: 4x4
+Assembly Score: 0.700
+
+Position (0,0): Piece 10
+Position (0,1): Piece 5
+Position (0,2): Piece 12
+Position (0,3): Piece 0
+Position (1,0): Piece 11
+Position (1,1): Piece 9
+Position (1,2): Piece 14
+Position (1,3): Piece 13
+Position (2,0): Piece 4
+Position (2,1): Piece 7
+Position (2,2): Piece 1
+Position (2,3): Piece 2
+Position (3,0): Piece 8
+Position (3,1): Piece 15
+Position (3,2): Piece 3
+Position (3,3): Piece 6
